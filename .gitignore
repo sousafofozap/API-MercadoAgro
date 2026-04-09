@@ -1,0 +1,11 @@
+node_modules/
+dist/
+.env
+.env.local
+.turbo/
+coverage/
+.idea/
+.vscode/
+npm-debug.log*
+pnpm-debug.log*
+yarn-error.log*

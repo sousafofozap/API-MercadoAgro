@@ -1,0 +1,26 @@
+services:
+  - type: web
+    name: mercadoagro-mobile-api
+    runtime: node
+    plan: free
+    region: oregon
+    autoDeployTrigger: commit
+    buildCommand: npm install && npm run build
+    preDeployCommand: npm run prisma:migrate:deploy
+    startCommand: npm start
+    healthCheckPath: /v1/health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: TRUST_PROXY
+        value: true
+      - key: REDIS_ENABLED
+        value: false
+      - key: DATABASE_URL
+        sync: false
+      - key: DIRECT_URL
+        sync: false
+      - key: JWT_ACCESS_SECRET
+        generateValue: true
+      - key: JWT_REFRESH_SECRET
+        generateValue: true
