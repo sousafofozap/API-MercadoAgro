@@ -6,7 +6,6 @@ services:
     region: oregon
     autoDeployTrigger: commit
     buildCommand: npm install && npm run build
-    preDeployCommand: npm run prisma:migrate:deploy
     startCommand: npm start
     healthCheckPath: /v1/health
     envVars:
