@@ -42,6 +42,18 @@ function ensureString(
   return resolved;
 }
 
+function ensureSecret(value: string | undefined, key: string): string {
+  const secret = ensureString(value, key);
+
+  if (secret.length < 32) {
+    throw new Error(
+      `${key} deve ter no minimo 32 caracteres para garantir seguranca criptografica`,
+    );
+  }
+
+  return secret;
+}
+
 function ensureNumber(
   value: string | undefined,
   key: string,
@@ -112,8 +124,8 @@ export function validateEnv(env: Record<string, string | undefined>): RuntimeEnv
     DIRECT_URL: ensureString(env.DIRECT_URL, 'DIRECT_URL', env.DATABASE_URL),
     REDIS_ENABLED: ensureBoolean(env.REDIS_ENABLED, 'REDIS_ENABLED', false),
     REDIS_URL: ensureString(env.REDIS_URL, 'REDIS_URL', 'redis://localhost:6379'),
-    JWT_ACCESS_SECRET: ensureString(env.JWT_ACCESS_SECRET, 'JWT_ACCESS_SECRET'),
-    JWT_REFRESH_SECRET: ensureString(env.JWT_REFRESH_SECRET, 'JWT_REFRESH_SECRET'),
+    JWT_ACCESS_SECRET: ensureSecret(env.JWT_ACCESS_SECRET, 'JWT_ACCESS_SECRET'),
+    JWT_REFRESH_SECRET: ensureSecret(env.JWT_REFRESH_SECRET, 'JWT_REFRESH_SECRET'),
     JWT_ACCESS_TTL: ensureDuration(env.JWT_ACCESS_TTL, 'JWT_ACCESS_TTL', '15m'),
     JWT_REFRESH_TTL: ensureDuration(env.JWT_REFRESH_TTL, 'JWT_REFRESH_TTL', '30d'),
     CORS_ORIGINS: (env.CORS_ORIGINS ?? '')

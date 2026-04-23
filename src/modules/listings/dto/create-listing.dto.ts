@@ -6,6 +6,7 @@ import {
   IsNumber,
   IsOptional,
   IsString,
+  IsUrl,
   MaxLength,
   Min,
   MinLength,
@@ -55,7 +56,7 @@ export class CreateListingDto {
     example: 'https://images.example.com/colheitadeira.jpg',
   })
   @IsOptional()
-  @IsString()
+  @IsUrl({ protocols: ['https'], require_tld: true, require_protocol: true })
   @MaxLength(500)
   imageUrl?: string;
 

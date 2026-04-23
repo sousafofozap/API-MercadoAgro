@@ -86,7 +86,7 @@ export class AuthService {
       },
     });
 
-    const { token: verificationToken, verificationUrl } =
+    const { verificationUrl } =
       await this.issueEmailVerificationToken(user.id, user.email, user.fullName);
 
     await this.logAudit({
@@ -105,7 +105,7 @@ export class AuthService {
       email: user.email,
       role: user.role,
       ...(this.configService.getOrThrow<string>('NODE_ENV') !== 'production'
-        ? { verificationToken, verificationUrl }
+        ? { verificationUrl }
         : {}),
     };
   }
@@ -172,7 +172,7 @@ export class AuthService {
       };
     }
 
-    const { token: verificationToken, verificationUrl } =
+    const { verificationUrl } =
       await this.issueEmailVerificationToken(user.id, user.email, user.fullName);
 
     await this.logAudit({
@@ -186,7 +186,7 @@ export class AuthService {
       message:
         'Se existir uma conta pendente para este e-mail, um novo link de verificacao sera enviado.',
       ...(this.configService.getOrThrow<string>('NODE_ENV') !== 'production'
-        ? { verificationToken, verificationUrl }
+        ? { verificationUrl }
         : {}),
     };
   }

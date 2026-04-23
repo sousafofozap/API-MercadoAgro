@@ -26,17 +26,24 @@ async function bootstrap() {
     new FastifyAdapter({
       logger: true,
       trustProxy: resolveTrustProxy(),
+      bodyLimit: 1_048_576, // 1 MB
     }),
   );
 
   const config = app.get(ConfigService);
   const port = config.getOrThrow<number>('PORT');
   const prefix = config.getOrThrow<string>('API_PREFIX');
+  const nodeEnv = config.getOrThrow<string>('NODE_ENV');
   const corsOrigins = config.get<string[]>('CORS_ORIGINS') ?? [];
 
   await app.register(helmet as never, {
     global: true,
-    contentSecurityPolicy: false,
+    contentSecurityPolicy: {
+      directives: {
+        defaultSrc: ["'none'"],
+        frameAncestors: ["'none'"],
+      },
+    },
     hsts: {
       maxAge: 15_552_000,
       includeSubDomains: true,
@@ -44,8 +51,9 @@ async function bootstrap() {
     },
   });
 
+  const allowAllOrigins = nodeEnv !== 'production';
   app.enableCors({
-    origin: corsOrigins.length > 0 ? corsOrigins : true,
+    origin: corsOrigins.length > 0 ? corsOrigins : allowAllOrigins,
     credentials: true,
   });
 
