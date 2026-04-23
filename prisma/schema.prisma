@@ -18,6 +18,11 @@ enum ListingStatus {
   ARCHIVED
 }
 
+enum ListingCondition {
+  NOVA
+  SEMINOVA
+}
+
 model User {
   id                      String                   @id @default(uuid())
   email                   String                   @unique
@@ -26,59 +31,99 @@ model User {
   role                    UserRole                 @default(USER)
   phone                   String?
   avatarUrl               String?
+  cpfCnpj                 String?
+  termsAcceptedAt         DateTime?
+  privacyAcceptedAt       DateTime?
+  termsVersion            String?
   emailVerifiedAt         DateTime?
+  deletedAt               DateTime?
   createdAt               DateTime                 @default(now())
   updatedAt               DateTime                 @updatedAt
   listings                Listing[]
   refreshTokens           RefreshToken[]
   emailVerificationTokens EmailVerificationToken[]
+  passwordResetTokens     PasswordResetToken[]
   auditLogs               AuditLog[]
 }
 
 model RefreshToken {
-  id          String   @id
+  id          String    @id
   userId      String
   hashedToken String
   expiresAt   DateTime
   revokedAt   DateTime?
   userAgent   String?
   ipAddress   String?
-  createdAt   DateTime @default(now())
-  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt   DateTime  @default(now())
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId])
 }
 
 model EmailVerificationToken {
-  id         String   @id @default(uuid())
+  id         String    @id @default(uuid())
   userId     String
   tokenHash  String
   expiresAt  DateTime
   consumedAt DateTime?
-  createdAt  DateTime @default(now())
-  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt  DateTime  @default(now())
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([userId, tokenHash])
   @@index([expiresAt])
 }
 
+model PasswordResetToken {
+  id         String    @id @default(uuid())
+  userId     String
+  tokenHash  String    @unique
+  expiresAt  DateTime
+  consumedAt DateTime?
+  createdAt  DateTime  @default(now())
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
 model Listing {
-  id            String        @id @default(uuid())
-  title         String
-  description   String
-  category      String?
-  price         Decimal       @db.Decimal(12, 2)
-  locationCity  String?
-  locationState String?
-  imageUrl      String?
-  status        ListingStatus @default(DRAFT)
-  sellerId      String
-  createdAt     DateTime      @default(now())
-  updatedAt     DateTime      @updatedAt
-  seller        User          @relation(fields: [sellerId], references: [id], onDelete: Cascade)
+  id               String           @id @default(uuid())
+  title            String
+  description      String
+  category         String?
+  brand            String?
+  modelName        String?
+  manufacturingYear Int?
+  condition        ListingCondition?
+  hourmeterHours   Int?
+  powerCv          Int?
+  accessories      String[]          @default([])
+  price            Decimal           @db.Decimal(12, 2)
+  locationCity     String?
+  locationState    String?
+  lat              Float?
+  lng              Float?
+  status           ListingStatus     @default(DRAFT)
+  deletedAt        DateTime?
+  sellerId         String
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+  seller           User              @relation(fields: [sellerId], references: [id], onDelete: Cascade)
+  photos           Photo[]
 
   @@index([sellerId])
   @@index([status, createdAt])
+  @@index([deletedAt])
+}
+
+model Photo {
+  id        String   @id @default(uuid())
+  listingId String
+  url       String
+  order     Int      @default(0)
+  createdAt DateTime @default(now())
+  listing   Listing  @relation(fields: [listingId], references: [id], onDelete: Cascade)
+
+  @@index([listingId])
 }
 
 model AuditLog {

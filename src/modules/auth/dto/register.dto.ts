@@ -1,5 +1,7 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import {
+  Equals,
+  IsBoolean,
   IsEmail,
   IsOptional,
   IsString,
@@ -37,4 +39,20 @@ export class RegisterDto {
   @IsString()
   @MaxLength(30)
   phone?: string;
+
+  @ApiPropertyOptional({ example: '12345678900', description: 'CPF ou CNPJ (somente digitos)' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(18)
+  cpfCnpj?: string;
+
+  @ApiProperty({ example: true, description: 'Aceite dos termos de uso (obrigatorio)' })
+  @IsBoolean()
+  @Equals(true, { message: 'Voce deve aceitar os termos de uso.' })
+  termsAccepted!: boolean;
+
+  @ApiProperty({ example: true, description: 'Aceite da politica de privacidade (obrigatorio)' })
+  @IsBoolean()
+  @Equals(true, { message: 'Voce deve aceitar a politica de privacidade.' })
+  privacyAccepted!: boolean;
 }

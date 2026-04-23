@@ -22,11 +22,13 @@ import { RequestMeta } from '../../common/utils/request-meta';
 import { hashOpaqueToken } from '../../common/utils/token-hash';
 import { MailService } from '../mail/mail.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { ForgotPasswordDto } from './dto/forgot-password.dto';
 import { LoginDto } from './dto/login.dto';
 import { LogoutDto } from './dto/logout.dto';
 import { RefreshTokenDto } from './dto/refresh-token.dto';
 import { RegisterDto } from './dto/register.dto';
 import { ResendVerificationDto } from './dto/resend-verification.dto';
+import { ResetPasswordDto } from './dto/reset-password.dto';
 import { VerifyEmailDto } from './dto/verify-email.dto';
 
 type SafeUser = {
@@ -65,6 +67,8 @@ export class AuthService {
   async register(dto: RegisterDto) {
     const email = dto.email.trim().toLowerCase();
     const phone = dto.phone?.trim();
+    const cpfCnpj = dto.cpfCnpj?.trim().replace(/\D/g, '') || undefined;
+
     const existingUser = await this.prisma.user.findUnique({
       where: { email },
       select: { id: true },
@@ -75,6 +79,7 @@ export class AuthService {
     }
 
     const passwordHash = await argon2.hash(dto.password, passwordOptions);
+    const now = new Date();
 
     const user = await this.prisma.user.create({
       data: {
@@ -82,7 +87,11 @@ export class AuthService {
         fullName: dto.fullName.trim(),
         role: PUBLIC_USER_ROLE,
         ...(phone ? { phone } : {}),
+        ...(cpfCnpj ? { cpfCnpj } : {}),
         passwordHash,
+        termsAcceptedAt: now,
+        privacyAcceptedAt: now,
+        termsVersion: '1.0',
       },
     });
 
@@ -94,10 +103,7 @@ export class AuthService {
       userId: user.id,
       targetType: 'user',
       targetId: user.id,
-      metadata: {
-        email: user.email,
-        role: user.role,
-      },
+      metadata: { email: user.email, role: user.role },
     });
 
     return {
@@ -116,14 +122,9 @@ export class AuthService {
       where: {
         tokenHash,
         consumedAt: null,
-        expiresAt: {
-          gt: new Date(),
-        },
+        expiresAt: { gt: new Date() },
       },
-      select: {
-        id: true,
-        userId: true,
-      },
+      select: { id: true, userId: true },
     });
 
     if (!verificationRecord) {
@@ -148,21 +149,14 @@ export class AuthService {
       targetId: verificationRecord.userId,
     });
 
-    return {
-      message: 'E-mail verificado com sucesso.',
-    };
+    return { message: 'E-mail verificado com sucesso.' };
   }
 
   async resendVerification(dto: ResendVerificationDto) {
     const email = dto.email.trim().toLowerCase();
     const user = await this.prisma.user.findUnique({
       where: { email },
-      select: {
-        id: true,
-        email: true,
-        fullName: true,
-        emailVerifiedAt: true,
-      },
+      select: { id: true, email: true, fullName: true, emailVerifiedAt: true },
     });
 
     if (!user || user.emailVerifiedAt) {
@@ -191,6 +185,99 @@ export class AuthService {
     };
   }
 
+  async forgotPassword(dto: ForgotPasswordDto) {
+    const email = dto.email.trim().toLowerCase();
+    const user = await this.prisma.user.findUnique({
+      where: { email, deletedAt: null },
+      select: { id: true, email: true, fullName: true, emailVerifiedAt: true },
+    });
+
+    const genericResponse = {
+      message:
+        'Se existir uma conta ativa com este e-mail, voce recebera um link de redefinicao de senha.',
+    };
+
+    if (!user || !user.emailVerifiedAt) {
+      return genericResponse;
+    }
+
+    const token = randomUUID();
+    const tokenHash = hashOpaqueToken(token);
+    const expiresAt = new Date(Date.now() + 60 * 60 * 1_000);
+
+    await this.prisma.$transaction([
+      this.prisma.passwordResetToken.updateMany({
+        where: { userId: user.id, consumedAt: null },
+        data: { consumedAt: new Date() },
+      }),
+      this.prisma.passwordResetToken.create({
+        data: { userId: user.id, tokenHash, expiresAt },
+      }),
+    ]);
+
+    const result = await this.mailService.sendPasswordResetEmail({
+      email: user.email,
+      fullName: user.fullName,
+      token,
+    });
+
+    await this.logAudit({
+      event: 'auth.password_reset_requested',
+      userId: user.id,
+      targetType: 'user',
+      targetId: user.id,
+    });
+
+    return {
+      ...genericResponse,
+      ...(this.configService.getOrThrow<string>('NODE_ENV') !== 'production'
+        ? { resetUrl: result.url }
+        : {}),
+    };
+  }
+
+  async resetPassword(dto: ResetPasswordDto) {
+    const tokenHash = hashOpaqueToken(dto.token);
+    const resetRecord = await this.prisma.passwordResetToken.findFirst({
+      where: {
+        tokenHash,
+        consumedAt: null,
+        expiresAt: { gt: new Date() },
+      },
+      select: { id: true, userId: true },
+    });
+
+    if (!resetRecord) {
+      throw new BadRequestException('Token de redefinicao invalido ou expirado.');
+    }
+
+    const passwordHash = await argon2.hash(dto.password, passwordOptions);
+
+    await this.prisma.$transaction([
+      this.prisma.user.update({
+        where: { id: resetRecord.userId },
+        data: { passwordHash },
+      }),
+      this.prisma.passwordResetToken.update({
+        where: { id: resetRecord.id },
+        data: { consumedAt: new Date() },
+      }),
+      this.prisma.refreshToken.updateMany({
+        where: { userId: resetRecord.userId, revokedAt: null },
+        data: { revokedAt: new Date() },
+      }),
+    ]);
+
+    await this.logAudit({
+      event: 'auth.password_reset',
+      userId: resetRecord.userId,
+      targetType: 'user',
+      targetId: resetRecord.userId,
+    });
+
+    return { message: 'Senha redefinida com sucesso. Faca login com a nova senha.' };
+  }
+
   async login(dto: LoginDto, requestMeta: RequestMeta) {
     const email = dto.email.trim().toLowerCase();
     const user = await this.prisma.user.findUnique({
@@ -205,20 +292,22 @@ export class AuthService {
         emailVerifiedAt: true,
         createdAt: true,
         passwordHash: true,
+        deletedAt: true,
       },
     });
 
     if (!user) {
       await this.logAudit({
         event: 'auth.login_failed',
-        metadata: {
-          email,
-          reason: 'user_not_found',
-        },
+        metadata: { email, reason: 'user_not_found' },
         ipAddress: requestMeta.ipAddress,
         userAgent: requestMeta.userAgent,
       });
       throw new UnauthorizedException('Credenciais invalidas.');
+    }
+
+    if (user.deletedAt) {
+      throw new UnauthorizedException('Esta conta foi encerrada.');
     }
 
     const passwordMatches = await argon2.verify(user.passwordHash, dto.password);
@@ -228,10 +317,7 @@ export class AuthService {
         userId: user.id,
         targetType: 'user',
         targetId: user.id,
-        metadata: {
-          email: user.email,
-          reason: 'invalid_password',
-        },
+        metadata: { email: user.email, reason: 'invalid_password' },
         ipAddress: requestMeta.ipAddress,
         userAgent: requestMeta.userAgent,
       });
@@ -244,10 +330,7 @@ export class AuthService {
         userId: user.id,
         targetType: 'user',
         targetId: user.id,
-        metadata: {
-          email: user.email,
-          reason: 'email_not_verified',
-        },
+        metadata: { email: user.email, reason: 'email_not_verified' },
         ipAddress: requestMeta.ipAddress,
         userAgent: requestMeta.userAgent,
       });
@@ -267,10 +350,7 @@ export class AuthService {
       userAgent: requestMeta.userAgent,
     });
 
-    return {
-      user: this.serializeUser(user),
-      ...tokens,
-    };
+    return { user: this.serializeUser(user), ...tokens };
   }
 
   async refresh(dto: RefreshTokenDto, requestMeta: RequestMeta) {
@@ -278,12 +358,9 @@ export class AuthService {
 
     let payload: JwtRefreshPayload;
     try {
-      payload = await this.jwtService.verifyAsync<JwtRefreshPayload>(
-        dto.refreshToken,
-        {
-          secret: refreshSecret,
-        },
-      );
+      payload = await this.jwtService.verifyAsync<JwtRefreshPayload>(dto.refreshToken, {
+        secret: refreshSecret,
+      });
     } catch {
       throw new UnauthorizedException('Refresh token invalido.');
     }
@@ -305,6 +382,7 @@ export class AuthService {
             avatarUrl: true,
             emailVerifiedAt: true,
             createdAt: true,
+            deletedAt: true,
           },
         },
       },
@@ -319,10 +397,11 @@ export class AuthService {
       throw new UnauthorizedException('Refresh token expirado ou revogado.');
     }
 
-    const refreshMatches = await argon2.verify(
-      storedToken.hashedToken,
-      dto.refreshToken,
-    );
+    if (storedToken.user.deletedAt) {
+      throw new UnauthorizedException('Esta conta foi encerrada.');
+    }
+
+    const refreshMatches = await argon2.verify(storedToken.hashedToken, dto.refreshToken);
     if (!refreshMatches) {
       throw new UnauthorizedException('Refresh token invalido.');
     }
@@ -338,10 +417,7 @@ export class AuthService {
       userAgent: requestMeta.userAgent,
     });
 
-    return {
-      user: this.serializeUser(storedToken.user),
-      ...tokens,
-    };
+    return { user: this.serializeUser(storedToken.user), ...tokens };
   }
 
   async logout(userId: string, dto: LogoutDto) {
@@ -349,12 +425,9 @@ export class AuthService {
 
     let payload: JwtRefreshPayload;
     try {
-      payload = await this.jwtService.verifyAsync<JwtRefreshPayload>(
-        dto.refreshToken,
-        {
-          secret: refreshSecret,
-        },
-      );
+      payload = await this.jwtService.verifyAsync<JwtRefreshPayload>(dto.refreshToken, {
+        secret: refreshSecret,
+      });
     } catch {
       throw new UnauthorizedException('Refresh token invalido.');
     }
@@ -364,14 +437,8 @@ export class AuthService {
     }
 
     await this.prisma.refreshToken.updateMany({
-      where: {
-        id: payload.jti,
-        userId,
-        revokedAt: null,
-      },
-      data: {
-        revokedAt: new Date(),
-      },
+      where: { id: payload.jti, userId, revokedAt: null },
+      data: { revokedAt: new Date() },
     });
 
     await this.logAudit({
@@ -381,9 +448,7 @@ export class AuthService {
       targetId: payload.jti,
     });
 
-    return {
-      message: 'Sessao encerrada com sucesso.',
-    };
+    return { message: 'Sessao encerrada com sucesso.' };
   }
 
   private async issueTokens(user: SafeUser, requestMeta: RequestMeta) {
@@ -402,41 +467,21 @@ export class AuthService {
 
     await this.prisma.$transaction([
       this.prisma.emailVerificationToken.updateMany({
-        where: {
-          userId,
-          consumedAt: null,
-          expiresAt: {
-            gt: new Date(),
-          },
-        },
-        data: {
-          consumedAt: new Date(),
-        },
+        where: { userId, consumedAt: null, expiresAt: { gt: new Date() } },
+        data: { consumedAt: new Date() },
       }),
       this.prisma.emailVerificationToken.create({
         data: {
           tokenHash: hashOpaqueToken(token),
           expiresAt,
-          user: {
-            connect: {
-              id: userId,
-            },
-          },
+          user: { connect: { id: userId } },
         },
       }),
     ]);
 
-    const mailResult = await this.mailService.sendVerificationEmail({
-      email,
-      fullName,
-      token,
-    });
+    const mailResult = await this.mailService.sendVerificationEmail({ email, fullName, token });
 
-    return {
-      token,
-      verificationUrl: mailResult.verificationUrl,
-      preview: mailResult.preview,
-    };
+    return { verificationUrl: mailResult.verificationUrl, preview: mailResult.preview };
   }
 
   private serializeUser(user: SafeUser) {
@@ -463,15 +508,7 @@ export class AuthService {
   }) {
     const data: Prisma.AuditLogCreateInput = {
       event: input.event,
-      ...(input.userId
-        ? {
-            user: {
-              connect: {
-                id: input.userId,
-              },
-            },
-          }
-        : {}),
+      ...(input.userId ? { user: { connect: { id: input.userId } } } : {}),
       ...(input.targetType ? { targetType: input.targetType } : {}),
       ...(input.targetId ? { targetId: input.targetId } : {}),
       ...(input.metadata !== undefined ? { metadata: input.metadata } : {}),
@@ -479,18 +516,11 @@ export class AuthService {
       ...(input.userAgent ? { userAgent: input.userAgent } : {}),
     };
 
-    await this.prisma.auditLog.create({
-      data,
-    });
+    await this.prisma.auditLog.create({ data });
   }
 
   private async rotateRefreshToken(
-    storedToken: {
-      id: string;
-      userId: string;
-      user: SafeUser;
-      expiresAt: Date;
-    },
+    storedToken: { id: string; userId: string; user: SafeUser; expiresAt: Date },
     requestMeta: RequestMeta,
   ) {
     const tokenBundle = await this.buildTokenBundle(storedToken.user, requestMeta);
@@ -501,13 +531,9 @@ export class AuthService {
           id: storedToken.id,
           userId: storedToken.userId,
           revokedAt: null,
-          expiresAt: {
-            gt: new Date(),
-          },
+          expiresAt: { gt: new Date() },
         },
-        data: {
-          revokedAt: new Date(),
-        },
+        data: { revokedAt: new Date() },
       });
 
       if (revocation.count !== 1) {
@@ -525,8 +551,6 @@ export class AuthService {
     const refreshSecret = this.configService.getOrThrow<string>('JWT_REFRESH_SECRET');
     const accessTtl = this.configService.getOrThrow<string>('JWT_ACCESS_TTL');
     const refreshTtl = this.configService.getOrThrow<string>('JWT_REFRESH_TTL');
-    const accessExpiresIn = accessTtl as StringValue;
-    const refreshExpiresIn = refreshTtl as StringValue;
 
     const refreshTokenId = randomUUID();
     const accessPayload: JwtAccessPayload = {
@@ -546,11 +570,11 @@ export class AuthService {
     const [accessToken, refreshToken] = await Promise.all([
       this.jwtService.signAsync(accessPayload, {
         secret: accessSecret,
-        expiresIn: accessExpiresIn,
+        expiresIn: accessTtl as StringValue,
       }),
       this.jwtService.signAsync(refreshPayload, {
         secret: refreshSecret,
-        expiresIn: refreshExpiresIn,
+        expiresIn: refreshTtl as StringValue,
       }),
     ]);
 
@@ -563,11 +587,7 @@ export class AuthService {
       },
       refreshTokenRecord: {
         id: refreshTokenId,
-        user: {
-          connect: {
-            id: user.id,
-          },
-        },
+        user: { connect: { id: user.id } },
         hashedToken: await argon2.hash(refreshToken, passwordOptions),
         expiresAt: new Date(Date.now() + parseDurationToMs(refreshTtl)),
         ...(requestMeta.ipAddress ? { ipAddress: requestMeta.ipAddress } : {}),

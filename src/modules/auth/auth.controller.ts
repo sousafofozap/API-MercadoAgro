@@ -7,13 +7,17 @@ import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { Public } from '../../common/decorators/public.decorator';
 import { JwtAccessPayload } from '../../common/types/jwt-payload.type';
 import { getRequestMeta } from '../../common/utils/request-meta';
+import { AuthService } from './auth.service';
+import { ForgotPasswordDto } from './dto/forgot-password.dto';
 import { LoginDto } from './dto/login.dto';
 import { LogoutDto } from './dto/logout.dto';
 import { RefreshTokenDto } from './dto/refresh-token.dto';
 import { RegisterDto } from './dto/register.dto';
 import { ResendVerificationDto } from './dto/resend-verification.dto';
+import { ResetPasswordDto } from './dto/reset-password.dto';
 import { VerifyEmailDto } from './dto/verify-email.dto';
-import { AuthService } from './auth.service';
+
+const publicThrottle = { default: { limit: 20, ttl: 60_000 } };
 
 @ApiTags('Auth')
 @Controller('auth')
@@ -22,12 +26,7 @@ export class AuthController {
 
   @Post('register')
   @Public()
-  @Throttle({
-    default: {
-      limit: 20,
-      ttl: 60_000,
-    },
-  })
+  @Throttle(publicThrottle)
   @ApiOperation({ summary: 'Cria uma conta nova' })
   register(@Body() dto: RegisterDto) {
     return this.authService.register(dto);
@@ -35,12 +34,7 @@ export class AuthController {
 
   @Post('verify-email')
   @Public()
-  @Throttle({
-    default: {
-      limit: 20,
-      ttl: 60_000,
-    },
-  })
+  @Throttle(publicThrottle)
   @ApiOperation({ summary: 'Confirma o e-mail da conta' })
   verifyEmail(@Body() dto: VerifyEmailDto) {
     return this.authService.verifyEmail(dto);
@@ -48,25 +42,31 @@ export class AuthController {
 
   @Post('resend-verification')
   @Public()
-  @Throttle({
-    default: {
-      limit: 20,
-      ttl: 60_000,
-    },
-  })
+  @Throttle(publicThrottle)
   @ApiOperation({ summary: 'Reenvia o link de verificacao de e-mail' })
   resendVerification(@Body() dto: ResendVerificationDto) {
     return this.authService.resendVerification(dto);
   }
 
+  @Post('forgot-password')
+  @Public()
+  @Throttle(publicThrottle)
+  @ApiOperation({ summary: 'Inicia fluxo de redefinicao de senha por e-mail' })
+  forgotPassword(@Body() dto: ForgotPasswordDto) {
+    return this.authService.forgotPassword(dto);
+  }
+
+  @Post('reset-password')
+  @Public()
+  @Throttle(publicThrottle)
+  @ApiOperation({ summary: 'Conclui a redefinicao de senha com token recebido por e-mail' })
+  resetPassword(@Body() dto: ResetPasswordDto) {
+    return this.authService.resetPassword(dto);
+  }
+
   @Post('login')
   @Public()
-  @Throttle({
-    default: {
-      limit: 20,
-      ttl: 60_000,
-    },
-  })
+  @Throttle(publicThrottle)
   @ApiOperation({ summary: 'Autentica o usuario e devolve os tokens' })
   login(@Body() dto: LoginDto, @Req() request: FastifyRequest) {
     return this.authService.login(dto, getRequestMeta(request));
@@ -74,12 +74,7 @@ export class AuthController {
 
   @Post('refresh')
   @Public()
-  @Throttle({
-    default: {
-      limit: 20,
-      ttl: 60_000,
-    },
-  })
+  @Throttle(publicThrottle)
   @ApiOperation({ summary: 'Rotaciona o refresh token' })
   refresh(@Body() dto: RefreshTokenDto, @Req() request: FastifyRequest) {
     return this.authService.refresh(dto, getRequestMeta(request));

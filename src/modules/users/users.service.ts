@@ -1,6 +1,22 @@
-import { Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable, NotFoundException } from '@nestjs/common';
 
 import { PrismaService } from '../prisma/prisma.service';
+import { UpdateUserDto } from './dto/update-user.dto';
+
+const userSelect = {
+  id: true,
+  email: true,
+  fullName: true,
+  role: true,
+  phone: true,
+  avatarUrl: true,
+  cpfCnpj: true,
+  emailVerifiedAt: true,
+  termsAcceptedAt: true,
+  privacyAcceptedAt: true,
+  createdAt: true,
+  updatedAt: true,
+} as const;
 
 @Injectable()
 export class UsersService {
@@ -8,18 +24,52 @@ export class UsersService {
 
   findMe(userId: string) {
     return this.prisma.user.findUniqueOrThrow({
-      where: { id: userId },
-      select: {
-        id: true,
-        email: true,
-        fullName: true,
-        role: true,
-        phone: true,
-        avatarUrl: true,
-        emailVerifiedAt: true,
-        createdAt: true,
-        updatedAt: true,
-      },
+      where: { id: userId, deletedAt: null },
+      select: userSelect,
     });
+  }
+
+  async updateMe(userId: string, dto: UpdateUserDto) {
+    const exists = await this.prisma.user.findUnique({
+      where: { id: userId, deletedAt: null },
+      select: { id: true },
+    });
+
+    if (!exists) throw new NotFoundException('Usuario nao encontrado.');
+
+    return this.prisma.user.update({
+      where: { id: userId },
+      data: {
+        ...(dto.fullName !== undefined ? { fullName: dto.fullName.trim() } : {}),
+        ...(dto.phone !== undefined ? { phone: dto.phone?.trim() ?? null } : {}),
+        ...(dto.avatarUrl !== undefined ? { avatarUrl: dto.avatarUrl ?? null } : {}),
+      },
+      select: userSelect,
+    });
+  }
+
+  async deleteMe(userId: string) {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId, deletedAt: null },
+      select: { id: true },
+    });
+
+    if (!user) throw new NotFoundException('Usuario nao encontrado.');
+
+    await this.prisma.$transaction([
+      this.prisma.user.update({
+        where: { id: userId },
+        data: { deletedAt: new Date() },
+      }),
+      this.prisma.refreshToken.updateMany({
+        where: { userId, revokedAt: null },
+        data: { revokedAt: new Date() },
+      }),
+    ]);
+
+    return {
+      message:
+        'Conta encerrada. Seus dados serao anonimizados em ate 15 dias conforme a LGPD Art. 18.',
+    };
   }
 }

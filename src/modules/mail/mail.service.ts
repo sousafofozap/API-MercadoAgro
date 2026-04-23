@@ -14,8 +14,14 @@ type VerificationEmailInput = {
   token: string;
 };
 
-type VerificationEmailResult = {
-  verificationUrl: string;
+type PasswordResetEmailInput = {
+  email: string;
+  fullName: string;
+  token: string;
+};
+
+type EmailResult = {
+  url: string;
   preview: 'logger' | 'smtp';
 };
 
@@ -48,10 +54,11 @@ export class MailService implements OnModuleInit {
     this.logger.log('Transporte SMTP configurado com sucesso.');
   }
 
-  async sendVerificationEmail(
-    input: VerificationEmailInput,
-  ): Promise<VerificationEmailResult> {
-    const verificationUrl = this.buildVerificationUrl(input.token);
+  async sendVerificationEmail(input: VerificationEmailInput): Promise<{
+    verificationUrl: string;
+    preview: 'logger' | 'smtp';
+  }> {
+    const verificationUrl = this.buildUrl('EMAIL_VERIFICATION_URL_TEMPLATE', input.token);
     const subject = 'Confirme o seu e-mail no MercadoAgro';
     const text = [
       `Ola, ${input.fullName}.`,
@@ -66,9 +73,7 @@ export class MailService implements OnModuleInit {
         <h2 style="color: #166534;">MercadoAgro</h2>
         <p>Ola, ${input.fullName}.</p>
         <p>Recebemos o seu cadastro no MercadoAgro.</p>
-        <p>
-          Para confirmar o seu e-mail, acesse o link abaixo:
-        </p>
+        <p>Para confirmar o seu e-mail, acesse o link abaixo:</p>
         <p>
           <a href="${verificationUrl}" style="color: #166534; font-weight: bold;">
             Confirmar e-mail
@@ -78,44 +83,41 @@ export class MailService implements OnModuleInit {
       </div>
     `.trim();
 
-    if (this.configService.getOrThrow<'logger' | 'smtp'>('MAIL_DRIVER') === 'logger') {
-      this.logger.log(
-        [
-          'Email de verificacao gerado em modo logger.',
-          `Para: ${input.email}`,
-          `Assunto: ${subject}`,
-          `Link: ${verificationUrl}`,
-        ].join('\n'),
-      );
+    const result = await this.sendMail({ to: input.email, subject, text, html });
 
-      return {
-        verificationUrl,
-        preview: 'logger',
-      };
-    }
+    return { verificationUrl, preview: result.preview };
+  }
 
-    if (!this.transporter) {
-      throw new InternalServerErrorException(
-        'O servico de e-mail nao foi inicializado corretamente.',
-      );
-    }
+  async sendPasswordResetEmail(input: PasswordResetEmailInput): Promise<EmailResult> {
+    const resetUrl = this.buildUrl('PASSWORD_RESET_URL_TEMPLATE', input.token);
+    const subject = 'Redefinicao de senha — MercadoAgro';
+    const text = [
+      `Ola, ${input.fullName}.`,
+      '',
+      'Recebemos uma solicitacao de redefinicao de senha para a sua conta.',
+      `Acesse o link abaixo para criar uma nova senha (valido por 1 hora):`,
+      resetUrl,
+      '',
+      'Se voce nao solicitou essa redefinicao, ignore esta mensagem.',
+    ].join('\n');
+    const html = `
+      <div style="font-family: Arial, sans-serif; line-height: 1.6; color: #1f2937;">
+        <h2 style="color: #166534;">MercadoAgro</h2>
+        <p>Ola, ${input.fullName}.</p>
+        <p>Recebemos uma solicitacao de redefinicao de senha para a sua conta.</p>
+        <p>Clique no link abaixo para criar uma nova senha (valido por <strong>1 hora</strong>):</p>
+        <p>
+          <a href="${resetUrl}" style="color: #166534; font-weight: bold;">
+            Redefinir senha
+          </a>
+        </p>
+        <p>Se voce nao solicitou essa redefinicao, ignore esta mensagem. Sua senha permanece a mesma.</p>
+      </div>
+    `.trim();
 
-    await this.transporter.sendMail({
-      from: {
-        name: this.configService.getOrThrow<string>('MAIL_FROM_NAME'),
-        address: this.configService.getOrThrow<string>('MAIL_FROM_ADDRESS'),
-      },
-      replyTo: this.configService.getOrThrow<string>('MAIL_REPLY_TO'),
-      to: input.email,
-      subject,
-      text,
-      html,
-    });
+    const result = await this.sendMail({ to: input.email, subject, text, html });
 
-    return {
-      verificationUrl,
-      preview: 'smtp',
-    };
+    return { url: resetUrl, preview: result.preview };
   }
 
   async ping() {
@@ -131,11 +133,46 @@ export class MailService implements OnModuleInit {
     return 'SMTP_READY';
   }
 
-  private buildVerificationUrl(token: string) {
-    const template = this.configService.getOrThrow<string>(
-      'EMAIL_VERIFICATION_URL_TEMPLATE',
-    );
-
+  private buildUrl(templateKey: string, token: string): string {
+    const template = this.configService.getOrThrow<string>(templateKey);
     return template.replace('{{token}}', encodeURIComponent(token));
+  }
+
+  private async sendMail(input: {
+    to: string;
+    subject: string;
+    text: string;
+    html: string;
+  }): Promise<{ preview: 'logger' | 'smtp' }> {
+    if (this.configService.getOrThrow<'logger' | 'smtp'>('MAIL_DRIVER') === 'logger') {
+      this.logger.log(
+        [
+          'Email gerado em modo logger.',
+          `Para: ${input.to}`,
+          `Assunto: ${input.subject}`,
+        ].join('\n'),
+      );
+      return { preview: 'logger' };
+    }
+
+    if (!this.transporter) {
+      throw new InternalServerErrorException(
+        'O servico de e-mail nao foi inicializado corretamente.',
+      );
+    }
+
+    await this.transporter.sendMail({
+      from: {
+        name: this.configService.getOrThrow<string>('MAIL_FROM_NAME'),
+        address: this.configService.getOrThrow<string>('MAIL_FROM_ADDRESS'),
+      },
+      replyTo: this.configService.getOrThrow<string>('MAIL_REPLY_TO'),
+      to: input.to,
+      subject: input.subject,
+      text: input.text,
+      html: input.html,
+    });
+
+    return { preview: 'smtp' };
   }
 }
