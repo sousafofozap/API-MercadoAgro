@@ -98,6 +98,7 @@ model Listing {
   powerCv          Int?
   accessories      String[]          @default([])
   price            Decimal           @db.Decimal(12, 2)
+  imageUrl         String?
   locationCity     String?
   locationState    String?
   lat              Float?
