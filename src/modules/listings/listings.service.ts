@@ -73,6 +73,19 @@ function stripGeo<T extends { lat?: number | null; lng?: number | null }>(
   return rest;
 }
 
+type ListingWithPrice = {
+  price: Prisma.Decimal | number | string;
+};
+
+function serializeListing<T extends ListingWithPrice>(
+  listing: T,
+): Omit<T, 'price'> & { price: number } {
+  return {
+    ...listing,
+    price: Number(listing.price),
+  };
+}
+
 @Injectable()
 export class ListingsService {
   constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
@@ -122,7 +135,7 @@ export class ListingsService {
       ]);
 
       return {
-        items,
+        items: items.map(serializeListing),
         meta: {
           page,
           pageSize,
@@ -148,7 +161,9 @@ export class ListingsService {
 
     const total = filtered.length;
     const start = (page - 1) * pageSize;
-    const items = filtered.slice(start, start + pageSize).map(stripGeo);
+    const items = filtered
+      .slice(start, start + pageSize)
+      .map((item) => serializeListing(stripGeo(item)));
 
     return {
       items,
@@ -169,7 +184,7 @@ export class ListingsService {
 
     if (!listing) throw new NotFoundException('Anuncio nao encontrado.');
 
-    return listing;
+    return serializeListing(listing);
   }
 
   async findMine(sellerId: string, page: number, pageSize: number) {
@@ -187,13 +202,13 @@ export class ListingsService {
     ]);
 
     return {
-      items,
+      items: items.map(serializeListing),
       meta: { page, pageSize, total, totalPages: Math.ceil(total / pageSize) },
     };
   }
 
   async create(sellerId: string, dto: CreateListingDto) {
-    return this.prisma.listing.create({
+    const listing = await this.prisma.listing.create({
       data: {
         title: dto.title.trim(),
         description: dto.description.trim(),
@@ -216,12 +231,14 @@ export class ListingsService {
       },
       select: listingPublicSelect,
     });
+
+    return serializeListing(listing);
   }
 
   async update(id: string, sellerId: string, dto: UpdateListingDto) {
     await this.assertOwnership(id, sellerId);
 
-    return this.prisma.listing.update({
+    const listing = await this.prisma.listing.update({
       where: { id },
       data: {
         ...(dto.title !== undefined ? { title: dto.title.trim() } : {}),
@@ -246,6 +263,8 @@ export class ListingsService {
       },
       select: listingPublicSelect,
     });
+
+    return serializeListing(listing);
   }
 
   async remove(id: string, sellerId: string) {
