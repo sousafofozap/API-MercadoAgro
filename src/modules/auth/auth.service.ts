@@ -67,7 +67,7 @@ export class AuthService {
   async register(dto: RegisterDto) {
     const email = dto.email.trim().toLowerCase();
     const phone = dto.phone?.trim();
-    const cpfCnpj = dto.cpfCnpj?.trim().replace(/\D/g, '') || undefined;
+    const cpfCnpj = this.normalizeCpfCnpj(dto.cpfCnpj);
 
     const existingUser = await this.prisma.user.findUnique({
       where: { email },
@@ -80,20 +80,34 @@ export class AuthService {
 
     const passwordHash = await argon2.hash(dto.password, passwordOptions);
     const now = new Date();
+    const termsVersion = this.configService.getOrThrow<string>('TERMS_VERSION');
 
-    const user = await this.prisma.user.create({
-      data: {
-        email,
-        fullName: dto.fullName.trim(),
-        role: PUBLIC_USER_ROLE,
-        ...(phone ? { phone } : {}),
-        ...(cpfCnpj ? { cpfCnpj } : {}),
-        passwordHash,
-        termsAcceptedAt: now,
-        privacyAcceptedAt: now,
-        termsVersion: '1.0',
-      },
-    });
+    let user;
+    try {
+      user = await this.prisma.user.create({
+        data: {
+          email,
+          fullName: dto.fullName.trim(),
+          role: PUBLIC_USER_ROLE,
+          ...(phone ? { phone } : {}),
+          ...(cpfCnpj ? { cpfCnpj } : {}),
+          passwordHash,
+          termsAcceptedAt: now,
+          privacyAcceptedAt: now,
+          termsVersion,
+        },
+      });
+    } catch (error) {
+      if (
+        error instanceof Prisma.PrismaClientKnownRequestError &&
+        error.code === 'P2002'
+      ) {
+        throw new ConflictException(
+          'Ja existe uma conta cadastrada com este e-mail.',
+        );
+      }
+      throw error;
+    }
 
     const { verificationUrl } =
       await this.issueEmailVerificationToken(user.id, user.email, user.fullName);
@@ -388,12 +402,16 @@ export class AuthService {
       },
     });
 
-    if (
-      !storedToken ||
-      storedToken.userId !== payload.sub ||
-      storedToken.revokedAt ||
-      storedToken.expiresAt <= new Date()
-    ) {
+    if (!storedToken || storedToken.userId !== payload.sub) {
+      throw new UnauthorizedException('Refresh token expirado ou revogado.');
+    }
+
+    if (storedToken.revokedAt) {
+      await this.handleRefreshTokenReuse(storedToken.userId, storedToken.id, requestMeta);
+      throw new UnauthorizedException('Refresh token expirado ou revogado.');
+    }
+
+    if (storedToken.expiresAt <= new Date()) {
       throw new UnauthorizedException('Refresh token expirado ou revogado.');
     }
 
@@ -403,6 +421,7 @@ export class AuthService {
 
     const refreshMatches = await argon2.verify(storedToken.hashedToken, dto.refreshToken);
     if (!refreshMatches) {
+      await this.handleRefreshTokenReuse(storedToken.userId, storedToken.id, requestMeta);
       throw new UnauthorizedException('Refresh token invalido.');
     }
 
@@ -601,5 +620,69 @@ export class AuthService {
     data: Prisma.RefreshTokenCreateInput,
   ) {
     await prisma.refreshToken.create({ data });
+  }
+
+  private async handleRefreshTokenReuse(
+    userId: string,
+    suspectTokenId: string,
+    requestMeta: RequestMeta,
+  ) {
+    await this.prisma.refreshToken.updateMany({
+      where: { userId, revokedAt: null },
+      data: { revokedAt: new Date() },
+    });
+
+    await this.logAudit({
+      event: 'auth.refresh_token_reuse_detected',
+      userId,
+      targetType: 'refresh_token',
+      targetId: suspectTokenId,
+      ipAddress: requestMeta.ipAddress,
+      userAgent: requestMeta.userAgent,
+    });
+  }
+
+  private normalizeCpfCnpj(value: string | undefined): string | undefined {
+    if (!value) return undefined;
+    const digits = value.trim().replace(/\D/g, '');
+    if (digits.length === 0) return undefined;
+    if (digits.length !== 11 && digits.length !== 14) {
+      throw new BadRequestException('CPF ou CNPJ invalido.');
+    }
+    if (digits.length === 11 && !this.isValidCpf(digits)) {
+      throw new BadRequestException('CPF invalido.');
+    }
+    if (digits.length === 14 && !this.isValidCnpj(digits)) {
+      throw new BadRequestException('CNPJ invalido.');
+    }
+    return digits;
+  }
+
+  private isValidCpf(cpf: string): boolean {
+    if (/^(\d)\1{10}$/.test(cpf)) return false;
+    const calc = (slice: string, factor: number) => {
+      let sum = 0;
+      for (const ch of slice) sum += Number(ch) * factor--;
+      const rest = (sum * 10) % 11;
+      return rest === 10 ? 0 : rest;
+    };
+    const d1 = calc(cpf.slice(0, 9), 10);
+    const d2 = calc(cpf.slice(0, 10), 11);
+    return d1 === Number(cpf[9]) && d2 === Number(cpf[10]);
+  }
+
+  private isValidCnpj(cnpj: string): boolean {
+    if (/^(\d)\1{13}$/.test(cnpj)) return false;
+    const calc = (slice: string, weights: number[]) => {
+      let sum = 0;
+      for (let i = 0; i < weights.length; i++) sum += Number(slice[i]) * weights[i]!;
+      const rest = sum % 11;
+      return rest < 2 ? 0 : 11 - rest;
+    };
+    const w1 = [5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2];
+    const w2 = [6, 5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2];
+    const d1 = calc(cnpj.slice(0, 12), w1);
+    const d2 = calc(cnpj.slice(0, 13), w2);
+    return d1 === Number(cnpj[12]) && d2 === Number(cnpj[13]);
   }
 }

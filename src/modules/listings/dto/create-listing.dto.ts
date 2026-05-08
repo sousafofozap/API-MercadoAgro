@@ -2,6 +2,7 @@ import { Type } from 'class-transformer';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { ListingCondition, ListingStatus } from '@prisma/client';
 import {
+  ArrayMaxSize,
   IsArray,
   IsEnum,
   IsInt,
@@ -9,11 +10,16 @@ import {
   IsOptional,
   IsString,
   IsUrl,
+  Length,
+  Matches,
   Max,
   MaxLength,
   Min,
   MinLength,
 } from 'class-validator';
+
+const BR_UF_REGEX =
+  /^(AC|AL|AP|AM|BA|CE|DF|ES|GO|MA|MT|MS|MG|PA|PB|PR|PE|PI|RJ|RN|RS|RO|RR|SC|SP|SE|TO)$/i;
 
 export class CreateListingDto {
   @ApiProperty({ example: 'Trator John Deere 6110J — Seminovo 2022' })
@@ -85,6 +91,7 @@ export class CreateListingDto {
   })
   @IsOptional()
   @IsArray()
+  @ArrayMaxSize(30)
   @IsString({ each: true })
   @MaxLength(60, { each: true })
   accessories?: string[];
@@ -95,10 +102,11 @@ export class CreateListingDto {
   @MaxLength(80)
   locationCity?: string;
 
-  @ApiPropertyOptional({ example: 'MA' })
+  @ApiPropertyOptional({ example: 'MA', description: 'Sigla UF (2 letras)' })
   @IsOptional()
   @IsString()
-  @MaxLength(2)
+  @Length(2, 2)
+  @Matches(BR_UF_REGEX, { message: 'locationState deve ser uma UF brasileira valida.' })
   locationState?: string;
 
   @ApiPropertyOptional({ example: -7.5321, description: 'Latitude' })

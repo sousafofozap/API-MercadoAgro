@@ -15,6 +15,7 @@ import { Throttle } from '@nestjs/throttler';
 
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { Public } from '../../common/decorators/public.decorator';
+import { PaginationQueryDto } from '../../common/dto/pagination-query.dto';
 import { JwtAccessPayload } from '../../common/types/jwt-payload.type';
 import { AddPhotoDto } from './dto/add-photo.dto';
 import { CreateListingDto } from './dto/create-listing.dto';
@@ -45,10 +46,13 @@ export class ListingsController {
   @ApiOperation({ summary: 'Lista os proprios anuncios do anunciante autenticado' })
   findMine(
     @CurrentUser() user: JwtAccessPayload,
-    @Query('page') page = 1,
-    @Query('pageSize') pageSize = 20,
+    @Query() pagination: PaginationQueryDto,
   ) {
-    return this.listingsService.findMine(user.sub, Number(page), Number(pageSize));
+    return this.listingsService.findMine(
+      user.sub,
+      pagination.page ?? 1,
+      pagination.pageSize ?? 20,
+    );
   }
 
   @Get(':id')

@@ -69,7 +69,7 @@ async function testRegisterUsesSinglePublicRole() {
   const service = new AuthService(
     prisma,
     createJwtService(),
-    createConfigService({ NODE_ENV: 'test' }),
+    createConfigService({ NODE_ENV: 'test', TERMS_VERSION: '1.0' }),
     createMailService(),
   );
 
