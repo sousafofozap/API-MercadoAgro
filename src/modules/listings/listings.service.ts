@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   ForbiddenException,
   Inject,
   Injectable,
@@ -25,6 +26,7 @@ const listingPublicSelect = {
   powerCv: true,
   accessories: true,
   price: true,
+  imageUrl: true,
   locationCity: true,
   locationState: true,
   status: true,
@@ -39,6 +41,38 @@ const listingPublicSelect = {
   },
 } as const;
 
+const listingPublicSelectWithGeo = {
+  ...listingPublicSelect,
+  lat: true,
+  lng: true,
+} as const;
+
+const EARTH_RADIUS_KM = 6_371;
+
+function haversineKm(
+  aLat: number,
+  aLng: number,
+  bLat: number,
+  bLng: number,
+): number {
+  const toRad = (deg: number) => (deg * Math.PI) / 180;
+  const dLat = toRad(bLat - aLat);
+  const dLng = toRad(bLng - aLng);
+  const sinLat = Math.sin(dLat / 2);
+  const sinLng = Math.sin(dLng / 2);
+  const h =
+    sinLat * sinLat +
+    Math.cos(toRad(aLat)) * Math.cos(toRad(bLat)) * sinLng * sinLng;
+  return 2 * EARTH_RADIUS_KM * Math.asin(Math.min(1, Math.sqrt(h)));
+}
+
+function stripGeo<T extends { lat?: number | null; lng?: number | null }>(
+  item: T,
+): Omit<T, 'lat' | 'lng'> {
+  const { lat: _lat, lng: _lng, ...rest } = item;
+  return rest;
+}
+
 @Injectable()
 export class ListingsService {
   constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
@@ -46,6 +80,7 @@ export class ListingsService {
   async listPublic(query: ListListingsQueryDto) {
     const page = query.page ?? 1;
     const pageSize = query.pageSize ?? 20;
+    const geoActive = this.assertGeoConsistency(query);
 
     const where: Prisma.ListingWhereInput = {
       status: ListingStatus.PUBLISHED,
@@ -71,23 +106,49 @@ export class ListingsService {
             },
           }
         : {}),
-      ...this.buildGeoFilter(query),
+      ...this.buildGeoBoundingBox(query),
     };
 
-    const [items, total] = await this.prisma.$transaction([
-      this.prisma.listing.findMany({
-        where,
-        orderBy: { createdAt: 'desc' },
-        skip: (page - 1) * pageSize,
-        take: pageSize,
-        select: {
-          ...listingPublicSelect,
-          lat: false,
-          lng: false,
+    if (!geoActive) {
+      const [items, total] = await this.prisma.$transaction([
+        this.prisma.listing.findMany({
+          where,
+          orderBy: { createdAt: 'desc' },
+          skip: (page - 1) * pageSize,
+          take: pageSize,
+          select: listingPublicSelect,
+        }),
+        this.prisma.listing.count({ where }),
+      ]);
+
+      return {
+        items,
+        meta: {
+          page,
+          pageSize,
+          total,
+          totalPages: Math.ceil(total / pageSize),
         },
-      }),
-      this.prisma.listing.count({ where }),
-    ]);
+      };
+    }
+
+    const candidates = await this.prisma.listing.findMany({
+      where,
+      orderBy: { createdAt: 'desc' },
+      select: listingPublicSelectWithGeo,
+    });
+
+    const filtered = candidates.filter((item) => {
+      if (item.lat === null || item.lng === null) return false;
+      return (
+        haversineKm(query.lat!, query.lng!, item.lat, item.lng) <=
+        query.raioKm!
+      );
+    });
+
+    const total = filtered.length;
+    const start = (page - 1) * pageSize;
+    const items = filtered.slice(start, start + pageSize).map(stripGeo);
 
     return {
       items,
@@ -120,11 +181,7 @@ export class ListingsService {
         orderBy: { createdAt: 'desc' },
         skip: (page - 1) * pageSize,
         take: pageSize,
-        select: {
-          ...listingPublicSelect,
-          lat: false,
-          lng: false,
-        },
+        select: listingPublicSelect,
       }),
       this.prisma.listing.count({ where }),
     ]);
@@ -150,13 +207,14 @@ export class ListingsService {
         ...(dto.hourmeterHours !== undefined ? { hourmeterHours: dto.hourmeterHours } : {}),
         ...(dto.powerCv !== undefined ? { powerCv: dto.powerCv } : {}),
         ...(dto.accessories ? { accessories: dto.accessories } : {}),
+        ...(dto.imageUrl ? { imageUrl: dto.imageUrl.trim() } : {}),
         ...(dto.locationCity ? { locationCity: dto.locationCity.trim() } : {}),
         ...(dto.locationState ? { locationState: dto.locationState.trim().toUpperCase() } : {}),
         ...(dto.lat !== undefined ? { lat: dto.lat } : {}),
         ...(dto.lng !== undefined ? { lng: dto.lng } : {}),
         seller: { connect: { id: sellerId } },
       },
-      select: { ...listingPublicSelect, lat: false, lng: false },
+      select: listingPublicSelect,
     });
   }
 
@@ -178,6 +236,7 @@ export class ListingsService {
         ...(dto.hourmeterHours !== undefined ? { hourmeterHours: dto.hourmeterHours ?? null } : {}),
         ...(dto.powerCv !== undefined ? { powerCv: dto.powerCv ?? null } : {}),
         ...(dto.accessories !== undefined ? { accessories: dto.accessories } : {}),
+        ...(dto.imageUrl !== undefined ? { imageUrl: dto.imageUrl?.trim() ?? null } : {}),
         ...(dto.locationCity !== undefined ? { locationCity: dto.locationCity?.trim() ?? null } : {}),
         ...(dto.locationState !== undefined
           ? { locationState: dto.locationState?.trim().toUpperCase() ?? null }
@@ -185,7 +244,7 @@ export class ListingsService {
         ...(dto.lat !== undefined ? { lat: dto.lat ?? null } : {}),
         ...(dto.lng !== undefined ? { lng: dto.lng ?? null } : {}),
       },
-      select: { ...listingPublicSelect, lat: false, lng: false },
+      select: listingPublicSelect,
     });
   }
 
@@ -244,16 +303,37 @@ export class ListingsService {
     }
   }
 
-  private buildGeoFilter(
+  private assertGeoConsistency(
+    query: Pick<ListListingsQueryDto, 'lat' | 'lng' | 'raioKm'>,
+  ): boolean {
+    const provided = [query.lat, query.lng, query.raioKm].filter(
+      (v) => v !== undefined,
+    ).length;
+
+    if (provided === 0) return false;
+    if (provided !== 3) {
+      throw new BadRequestException(
+        'Filtro geografico exige lat, lng e raioKm em conjunto.',
+      );
+    }
+    return true;
+  }
+
+  private buildGeoBoundingBox(
     query: Pick<ListListingsQueryDto, 'lat' | 'lng' | 'raioKm'>,
   ): Prisma.ListingWhereInput {
-    if (query.lat === undefined || query.lng === undefined || query.raioKm === undefined) {
+    if (
+      query.lat === undefined ||
+      query.lng === undefined ||
+      query.raioKm === undefined
+    ) {
       return {};
     }
 
     const raio = query.raioKm;
     const latDelta = raio / 111;
-    const lngDelta = raio / (111 * Math.cos((query.lat * Math.PI) / 180));
+    const cosLat = Math.cos((query.lat * Math.PI) / 180);
+    const lngDelta = cosLat > 0.01 ? raio / (111 * cosLat) : 180;
 
     return {
       lat: { gte: query.lat - latDelta, lte: query.lat + latDelta },

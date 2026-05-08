@@ -22,6 +22,7 @@ type RuntimeEnv = {
   MAIL_REPLY_TO: string;
   EMAIL_VERIFICATION_URL_TEMPLATE: string;
   PASSWORD_RESET_URL_TEMPLATE: string;
+  TERMS_VERSION: string;
   SMTP_HOST: string;
   SMTP_PORT: number;
   SMTP_SECURE: boolean;
@@ -162,6 +163,7 @@ export function validateEnv(env: Record<string, string | undefined>): RuntimeEnv
       'PASSWORD_RESET_URL_TEMPLATE',
       'mercadoagro://reset-password?token={{token}}',
     ),
+    TERMS_VERSION: ensureString(env.TERMS_VERSION, 'TERMS_VERSION', '1.0'),
     SMTP_HOST: env.SMTP_HOST?.trim() ?? '',
     SMTP_PORT: ensureNumber(env.SMTP_PORT, 'SMTP_PORT', 587),
     SMTP_SECURE: ensureBoolean(env.SMTP_SECURE, 'SMTP_SECURE', false),

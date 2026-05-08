@@ -18,6 +18,7 @@ import { ResetPasswordDto } from './dto/reset-password.dto';
 import { VerifyEmailDto } from './dto/verify-email.dto';
 
 const publicThrottle = { default: { limit: 20, ttl: 60_000 } };
+const sensitiveThrottle = { default: { limit: 5, ttl: 60_000 } };
 
 @ApiTags('Auth')
 @Controller('auth')
@@ -50,7 +51,7 @@ export class AuthController {
 
   @Post('forgot-password')
   @Public()
-  @Throttle(publicThrottle)
+  @Throttle(sensitiveThrottle)
   @ApiOperation({ summary: 'Inicia fluxo de redefinicao de senha por e-mail' })
   forgotPassword(@Body() dto: ForgotPasswordDto) {
     return this.authService.forgotPassword(dto);
@@ -58,7 +59,7 @@ export class AuthController {
 
   @Post('reset-password')
   @Public()
-  @Throttle(publicThrottle)
+  @Throttle(sensitiveThrottle)
   @ApiOperation({ summary: 'Conclui a redefinicao de senha com token recebido por e-mail' })
   resetPassword(@Body() dto: ResetPasswordDto) {
     return this.authService.resetPassword(dto);
@@ -66,7 +67,7 @@ export class AuthController {
 
   @Post('login')
   @Public()
-  @Throttle(publicThrottle)
+  @Throttle(sensitiveThrottle)
   @ApiOperation({ summary: 'Autentica o usuario e devolve os tokens' })
   login(@Body() dto: LoginDto, @Req() request: FastifyRequest) {
     return this.authService.login(dto, getRequestMeta(request));
