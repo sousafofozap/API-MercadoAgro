@@ -1,4 +1,5 @@
 import { Inject, Injectable, NotFoundException } from '@nestjs/common';
+import { UserProfile } from '@prisma/client';
 
 import { PrismaService } from '../prisma/prisma.service';
 import { UpdateUserDto } from './dto/update-user.dto';
@@ -8,6 +9,7 @@ const userSelect = {
   email: true,
   fullName: true,
   role: true,
+  profile: true,
   phone: true,
   avatarUrl: true,
   cpfCnpj: true,
@@ -49,6 +51,9 @@ export class UsersService {
         ...(dto.avatarUrl !== undefined || dto.avatar_url !== undefined
           ? { avatarUrl: dto.avatarUrl ?? dto.avatar_url ?? null }
           : {}),
+        ...(dto.perfil !== undefined
+          ? { profile: this.mapProfile(dto.perfil) }
+          : {}),
       },
       select: userSelect,
     });
@@ -76,6 +81,12 @@ export class UsersService {
     return {
       message:
         'Conta encerrada. Seus dados serao anonimizados em ate 15 dias conforme a LGPD Art. 18.',
-    };
+      };
+  }
+
+  private mapProfile(value: string): UserProfile {
+    return value.trim().toLowerCase() === 'comprador'
+      ? UserProfile.COMPRADOR
+      : UserProfile.ANUNCIANTE;
   }
 }

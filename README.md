@@ -9,10 +9,14 @@ Esta implementacao mantem os endpoints tecnicos originais em ingles (`/users`, `
 - API stateless com `NestJS + Fastify`
 - Persistencia em `PostgreSQL` via `Prisma`
 - Autenticacao com JWT access token e refresh token rotativo
+- Perfis funcionais separados entre `anunciante` e `comprador`
+- Avaliacoes, conversas e mensagens para o fluxo de negociacao
+- Upload multipart de fotos dos anuncios
 - Rate limit global e reforcado em rotas publicas/sensiveis
 - Validacao de entrada com `class-validator`
 - Auditoria de eventos relevantes de autenticacao
 - Swagger opcional por ambiente
+- Envelope de erro padronizado em PT-BR
 
 ## Endpoints Principais
 
@@ -33,15 +37,21 @@ O `register`, `login`, `reset-password`, `refresh` e `logout` aceitam aliases do
 ### Usuarios
 
 - `GET /v1/usuarios/me`: perfil autenticado no contrato PT-BR
-- `PUT /v1/usuarios/me`: atualiza perfil usando `nome`, `telefone`, `avatar_url`
+- `PUT /v1/usuarios/me`: atualiza perfil usando `nome`, `telefone`, `avatar_url`, `perfil`
 - `DELETE /v1/usuarios/me`: solicita exclusao da conta
-- `GET /v1/usuarios/:id/avaliacoes`: placeholder publico de avaliacoes
+- `GET /v1/usuarios/:id/avaliacoes`: lista avaliacoes publicas
 
 Aliases tecnicos equivalentes:
 
 - `GET /v1/users/me`
 - `PUT /v1/users/me`
 - `DELETE /v1/users/me`
+
+### Avaliacoes
+
+- `POST /v1/avaliacoes`: cria avaliacao autenticada
+- `GET /v1/avaliacoes/:usuarioId`: lista avaliacoes publicas de um usuario
+- `GET /v1/usuarios/:id/avaliacoes`: alias do contrato PT-BR
 
 ### Anuncios
 
@@ -51,7 +61,7 @@ Aliases tecnicos equivalentes:
 - `POST /v1/anuncios`: cria anuncio usando payload PT-BR
 - `PUT /v1/anuncios/:id`: edita anuncio proprio
 - `DELETE /v1/anuncios/:id`: remove anuncio proprio
-- `POST /v1/anuncios/:id/fotos`: adiciona foto por URL
+- `POST /v1/anuncios/:id/fotos`: adiciona foto por URL ou `multipart/form-data`
 - `DELETE /v1/anuncios/:id/fotos/:fotoId`: remove foto
 
 Aliases tecnicos equivalentes:
@@ -64,6 +74,14 @@ Aliases tecnicos equivalentes:
 - `DELETE /v1/listings/:id`
 - `POST /v1/listings/:id/photos`
 - `DELETE /v1/listings/:id/photos/:photoId`
+
+### Conversas
+
+- `GET /v1/conversas`: lista conversas do usuario autenticado
+- `POST /v1/conversas`: cria ou reabre conversa a partir de `anuncio_id`
+- `GET /v1/conversas/:id/mensagens`: lista mensagens
+- `POST /v1/conversas/:id/mensagens`: envia mensagem
+- `WS /v1/ws?token=ACCESS_TOKEN`: canal em tempo real para novas mensagens
 
 ## Exemplos do Contrato PT-BR
 
@@ -109,6 +127,12 @@ Resposta devolve `camelCase` e `snake_case`:
 
 ```json
 {
+  "usuario": {
+    "id": "uuid-v4",
+    "nome": "Joao Silva",
+    "email": "joao@email.com",
+    "perfil": "anunciante"
+  },
   "accessToken": "jwt",
   "refreshToken": "jwt",
   "tokenType": "Bearer",
@@ -186,6 +210,71 @@ Resposta:
 }
 ```
 
+### Upload de Foto
+
+Por URL:
+
+```json
+{
+  "foto_url": "https://cdn.mercadoagro.com.br/fotos/trator-1.jpg",
+  "ordem": 1
+}
+```
+
+Ou por multipart:
+
+```http
+POST /v1/anuncios/{id}/fotos
+Content-Type: multipart/form-data
+
+foto=<arquivo jpg/png/webp>
+ordem=1
+```
+
+O upload multipart salva em `uploads/` e retorna uma URL publica. Em Render, esse disco e efemero; para producao, configure storage persistente como S3, R2 ou equivalente.
+
+### Avaliar Usuario
+
+```json
+{
+  "avaliado_id": "uuid-do-anunciante",
+  "anuncio_id": "uuid-do-anuncio",
+  "nota": 5,
+  "comentario": "Negociacao transparente e maquina conforme anunciado."
+}
+```
+
+### Conversa e Mensagem
+
+```json
+{
+  "anuncio_id": "uuid-do-anuncio",
+  "mensagem_inicial": "Ola, a maquina ainda esta disponivel?"
+}
+```
+
+Mensagem por WebSocket em `/v1/ws?token=ACCESS_TOKEN`:
+
+```json
+{
+  "conversa_id": "uuid-da-conversa",
+  "conteudo": "Tenho interesse. Podemos conversar?"
+}
+```
+
+### Erro Padronizado
+
+```json
+{
+  "erro": "VALIDATION_ERROR",
+  "mensagem": "email must be an email",
+  "status": 400,
+  "timestamp": "2026-05-15T12:00:00.000Z",
+  "path": "/v1/auth/register",
+  "detalhes": ["email must be an email"]
+}
+```
+
 ## Segurança Implementada
 
 - Hash de senha com `Argon2id`
@@ -198,6 +287,7 @@ Resposta:
 - Rate limiting com Redis opcional e fallback em memoria
 - Health check publico simples e readiness detalhado protegido por `ADMIN`
 - Swagger desativavel por `SWAGGER_ENABLED`
+- Envelope de erro padronizado nos 4xx/5xx
 - Escapamento de HTML nos e-mails
 - `npm audit` zerado
 
@@ -210,6 +300,8 @@ Consulte `.env.example`. Pontos importantes:
 - `REDIS_ENABLED=true` recomendado em producao com `REDIS_URL`
 - `MAIL_DRIVER=smtp` exige `SMTP_HOST`, `SMTP_USER` e `SMTP_PASS`
 - `GEO_CANDIDATE_LIMIT` limita o custo da busca geografica em memoria
+- `UPLOAD_MAX_BYTES` define o tamanho maximo por imagem multipart
+- `UPLOAD_PUBLIC_BASE_URL` pode fixar a URL publica das imagens enviadas
 - `TERMS_VERSION` registra a versao aceita no cadastro
 
 ## Deploy
@@ -221,13 +313,14 @@ Comandos principais:
 ```bash
 npm install
 npm run build
+npm run prisma:migrate:deploy
 npm start
 ```
 
 No Render, use:
 
 - Build command: `npm install && npm run build`
-- Start command: `npm start`
+- Start command: `npm run prisma:migrate:deploy && npm start`
 - Health check path: `/v1/health`
 
 ## Qualidade
@@ -247,13 +340,9 @@ Tambem ha workflow de CI em `.github/workflows/ci.yml`.
 
 O contrato inicial em PDF tambem previa:
 
-- Perfis separados `anunciante` e `comprador` com RBAC especifico
 - Modulo de impulsionamento/destaque
-- Chat e WebSocket
-- Avaliacoes reais
-- Upload multipart real para CDN/storage
+- Storage persistente/CDN para substituir o upload local em disco
 - Job de anonimizacao LGPD apos solicitacao de exclusao
-- Envelope de erro padronizado em todos os 4xx/5xx
 - Canal formal para titulares de dados e documentacao de DPO
 
 Esses itens seguem como evolucao do produto.

@@ -6,7 +6,7 @@ services:
     region: oregon
     autoDeployTrigger: commit
     buildCommand: npm install && npm run build
-    startCommand: npm start
+    startCommand: npm run prisma:migrate:deploy && npm start
     healthCheckPath: /v1/health
     envVars:
       - key: NODE_ENV
@@ -21,6 +21,8 @@ services:
         value: '1.0'
       - key: GEO_CANDIDATE_LIMIT
         value: '5000'
+      - key: UPLOAD_MAX_BYTES
+        value: '5242880'
       - key: DATABASE_URL
         sync: false
       - key: DIRECT_URL

@@ -10,9 +10,23 @@ import {
   Post,
   Put,
   Query,
+  Req,
 } from '@nestjs/common';
-import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
+import {
+  ApiBearerAuth,
+  ApiBody,
+  ApiConsumes,
+  ApiOperation,
+  ApiTags,
+} from '@nestjs/swagger';
 import { Throttle } from '@nestjs/throttler';
+import { ConfigService } from '@nestjs/config';
+import { createWriteStream } from 'fs';
+import { mkdir } from 'fs/promises';
+import { resolve } from 'path';
+import { randomUUID } from 'crypto';
+import { pipeline } from 'stream/promises';
+import type { FastifyRequest } from 'fastify';
 import { ListingCondition } from '@prisma/client';
 
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
@@ -29,6 +43,11 @@ import { UpdateListingDto } from './dto/update-listing.dto';
 import { ListingsService } from './listings.service';
 
 const publicThrottle = { default: { limit: 20, ttl: 60_000 } };
+const allowedImageTypes = new Map([
+  ['image/jpeg', '.jpg'],
+  ['image/png', '.png'],
+  ['image/webp', '.webp'],
+]);
 
 type ListingResponse = {
   id: string;
@@ -233,6 +252,8 @@ export class AnunciosController {
   constructor(
     @Inject(ListingsService)
     private readonly listingsService: ListingsService,
+    @Inject(ConfigService)
+    private readonly configService: ConfigService,
   ) {}
 
   @Get()
@@ -313,21 +334,48 @@ export class AnunciosController {
 
   @Post(':id/fotos')
   @ApiBearerAuth('access-token')
+  @ApiConsumes('application/json', 'multipart/form-data')
+  @ApiBody({
+    required: false,
+    schema: {
+      oneOf: [
+        {
+          type: 'object',
+          properties: {
+            foto_url: { type: 'string', format: 'uri' },
+            ordem: { type: 'integer', example: 0 },
+          },
+        },
+        {
+          type: 'object',
+          properties: {
+            foto: { type: 'string', format: 'binary' },
+            ordem: { type: 'integer', example: 0 },
+          },
+        },
+      ],
+    },
+  })
   @ApiOperation({
-    summary: 'Adiciona uma foto por URL; upload multipart fica para evolucao',
+    summary: 'Adiciona uma foto por URL ou upload multipart',
   })
   async addPhoto(
     @CurrentUser() user: JwtAccessPayload,
     @Param('id') id: string,
-    @Body() dto: AddFotoAnuncioDto,
+    @Req() request: FastifyRequest,
+    @Body() dto?: AddFotoAnuncioDto,
   ) {
-    const url = dto.foto_url ?? dto.url;
+    const multipartPhoto = request.isMultipart()
+      ? await this.saveMultipartPhoto(id, request)
+      : undefined;
+    const url = multipartPhoto?.url ?? dto?.foto_url ?? dto?.url;
     if (!url) {
-      throw new BadRequestException('Informe foto_url ou url.');
+      throw new BadRequestException('Informe foto_url, url ou envie foto.');
     }
 
     const photoDto: AddPhotoDto = { url };
-    if (dto.ordem !== undefined) photoDto.order = dto.ordem;
+    const order = multipartPhoto?.order ?? dto?.ordem;
+    if (order !== undefined) photoDto.order = order;
 
     const photo = await this.listingsService.addPhoto(id, user.sub, photoDto);
 
@@ -344,5 +392,65 @@ export class AnunciosController {
     @Param('fotoId') fotoId: string,
   ) {
     await this.listingsService.removePhoto(id, fotoId, user.sub);
+  }
+
+  private async saveMultipartPhoto(listingId: string, request: FastifyRequest) {
+    const file = await request.file();
+    if (!file) {
+      throw new BadRequestException('Envie o arquivo no campo foto.');
+    }
+
+    const extension = allowedImageTypes.get(file.mimetype);
+    if (!extension) {
+      throw new BadRequestException(
+        'Formato de imagem invalido. Use JPG, PNG ou WebP.',
+      );
+    }
+
+    const filename = `${Date.now()}-${randomUUID()}${extension}`;
+    const relativePath = `/uploads/listings/${listingId}/${filename}`;
+    const directory = resolve(process.cwd(), 'uploads', 'listings', listingId);
+    await mkdir(directory, { recursive: true });
+    await pipeline(
+      file.file,
+      createWriteStream(resolve(directory, filename), { flags: 'wx' }),
+    );
+
+    return {
+      url: this.publicUploadUrl(request, relativePath),
+      order: this.parseMultipartOrder(file.fields),
+    };
+  }
+
+  private publicUploadUrl(request: FastifyRequest, relativePath: string) {
+    const configuredBase = this.configService.get<string>(
+      'UPLOAD_PUBLIC_BASE_URL',
+    );
+    if (configuredBase) return new URL(relativePath, configuredBase).toString();
+
+    const forwardedProto = String(
+      request.headers['x-forwarded-proto'] ?? '',
+    ).split(',')[0];
+    const forwardedHost = String(
+      request.headers['x-forwarded-host'] ?? '',
+    ).split(',')[0];
+    const protocol = forwardedProto || 'http';
+    const host = forwardedHost || request.headers.host || 'localhost';
+
+    return `${protocol}://${host}${relativePath}`;
+  }
+
+  private parseMultipartOrder(fields: Record<string, unknown>) {
+    const field = fields.ordem ?? fields.order;
+    const first = Array.isArray(field) ? field[0] : field;
+    if (!first || typeof first !== 'object' || !('value' in first)) {
+      return undefined;
+    }
+
+    const order = Number((first as { value: unknown }).value);
+    if (!Number.isInteger(order) || order < 0) {
+      throw new BadRequestException('ordem deve ser um inteiro positivo.');
+    }
+    return order;
   }
 }

@@ -162,10 +162,10 @@ export class RegisterDto {
 
   @ApiPropertyOptional({
     example: 'anunciante',
-    description: 'Alias legado aceito pelo app; contas publicas viram USER',
+    description: 'Perfil funcional do app mobile',
   })
   @IsOptional()
   @IsString()
-  @IsIn(['anunciante', 'usuario', 'user', 'USER'])
+  @IsIn(['anunciante', 'comprador', 'usuario', 'user', 'USER'])
   perfil?: string;
 }

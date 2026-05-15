@@ -5,6 +5,7 @@ dist/
 .env.local
 .turbo/
 coverage/
+uploads/
 *.tsbuildinfo
 .idea/
 .vscode/

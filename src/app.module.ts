@@ -8,12 +8,14 @@ import { RolesGuard } from './common/guards/roles.guard';
 import { getClientIp } from './common/utils/client-ip';
 import { validateEnv } from './config/env.validation';
 import { AuthModule } from './modules/auth/auth.module';
+import { ConversationsModule } from './modules/conversations/conversations.module';
 import { HealthModule } from './modules/health/health.module';
 import { ListingsModule } from './modules/listings/listings.module';
 import { MailModule } from './modules/mail/mail.module';
 import { PrismaModule } from './modules/prisma/prisma.module';
 import { RedisModule } from './modules/redis/redis.module';
 import { RedisThrottlerStorage } from './modules/redis/redis-throttler.storage';
+import { ReviewsModule } from './modules/reviews/reviews.module';
 import { UsersModule } from './modules/users/users.module';
 
 @Module({
@@ -48,6 +50,8 @@ import { UsersModule } from './modules/users/users.module';
     AuthModule,
     UsersModule,
     ListingsModule,
+    ReviewsModule,
+    ConversationsModule,
   ],
   providers: [
     {

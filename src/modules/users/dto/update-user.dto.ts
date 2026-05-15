@@ -1,5 +1,6 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import {
+  IsIn,
   IsOptional,
   IsString,
   IsUrl,
@@ -59,4 +60,10 @@ export class UpdateUserDto {
   @IsUrl({ protocols: ['https'], require_tld: true, require_protocol: true })
   @MaxLength(500)
   avatar_url?: string | null;
+
+  @ApiPropertyOptional({ example: 'comprador', enum: ['anunciante', 'comprador'] })
+  @IsOptional()
+  @IsString()
+  @IsIn(['anunciante', 'comprador'])
+  perfil?: string;
 }

@@ -15,6 +15,8 @@ type RuntimeEnv = {
   CORS_ORIGINS: string[];
   SWAGGER_ENABLED: boolean;
   GEO_CANDIDATE_LIMIT: number;
+  UPLOAD_MAX_BYTES: number;
+  UPLOAD_PUBLIC_BASE_URL: string;
   THROTTLE_TTL_MS: number;
   THROTTLE_LIMIT: number;
   PUBLIC_THROTTLE_LIMIT: number;
@@ -163,6 +165,12 @@ export function validateEnv(
       'GEO_CANDIDATE_LIMIT',
       5_000,
     ),
+    UPLOAD_MAX_BYTES: ensureNumber(
+      env.UPLOAD_MAX_BYTES,
+      'UPLOAD_MAX_BYTES',
+      5 * 1_024 * 1_024,
+    ),
+    UPLOAD_PUBLIC_BASE_URL: env.UPLOAD_PUBLIC_BASE_URL?.trim() ?? '',
     THROTTLE_TTL_MS: ensureNumber(
       env.THROTTLE_TTL_MS,
       'THROTTLE_TTL_MS',

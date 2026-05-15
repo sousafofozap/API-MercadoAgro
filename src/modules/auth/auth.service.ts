@@ -9,7 +9,7 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
-import { Prisma, UserRole } from '@prisma/client';
+import { Prisma, UserProfile, UserRole } from '@prisma/client';
 import * as argon2 from 'argon2';
 import type { StringValue } from 'ms';
 
@@ -36,6 +36,7 @@ type SafeUser = {
   email: string;
   fullName: string;
   role: UserRole;
+  profile: UserProfile;
   phone: string | null;
   avatarUrl: string | null;
   emailVerifiedAt: Date | null;
@@ -70,6 +71,7 @@ export class AuthService {
     const password = this.pickRequired(dto.password, dto.senha, 'senha');
     const phone = (dto.phone ?? dto.telefone)?.trim();
     const cpfCnpj = this.normalizeCpfCnpj(dto.cpfCnpj ?? dto.cpf_cnpj);
+    const profile = this.mapProfile(dto.perfil);
 
     const existingUser = await this.prisma.user.findUnique({
       where: { email },
@@ -93,6 +95,7 @@ export class AuthService {
           email,
           fullName: fullName.trim(),
           role: PUBLIC_USER_ROLE,
+          profile,
           ...(phone ? { phone } : {}),
           ...(cpfCnpj ? { cpfCnpj } : {}),
           passwordHash,
@@ -124,7 +127,7 @@ export class AuthService {
       userId: user.id,
       targetType: 'user',
       targetId: user.id,
-      metadata: { email: user.email, role: user.role },
+      metadata: { email: user.email, role: user.role, profile: user.profile },
     });
 
     return {
@@ -133,7 +136,7 @@ export class AuthService {
         'Cadastro realizado. Confirme o e-mail antes de acessar a plataforma.',
       nome: user.fullName,
       email: user.email,
-      perfil: 'anunciante',
+      perfil: this.serializeProfile(user.profile),
       role: user.role,
       criado_em: user.createdAt,
       ...(this.configService.getOrThrow<string>('NODE_ENV') !== 'production'
@@ -325,6 +328,7 @@ export class AuthService {
         email: true,
         fullName: true,
         role: true,
+        profile: true,
         phone: true,
         avatarUrl: true,
         emailVerifiedAt: true,
@@ -426,6 +430,7 @@ export class AuthService {
             email: true,
             fullName: true,
             role: true,
+            profile: true,
             phone: true,
             avatarUrl: true,
             emailVerifiedAt: true,
@@ -575,6 +580,7 @@ export class AuthService {
       email: user.email,
       fullName: user.fullName,
       role: user.role,
+      profile: user.profile,
       phone: user.phone,
       avatarUrl: user.avatarUrl,
       emailVerifiedAt: user.emailVerifiedAt,
@@ -588,7 +594,10 @@ export class AuthService {
       nome: user.fullName,
       email: user.email,
       telefone: user.phone,
-      perfil: user.role === UserRole.ADMIN ? 'admin' : 'anunciante',
+      perfil:
+        user.role === UserRole.ADMIN
+          ? 'admin'
+          : this.serializeProfile(user.profile),
       foto_url: user.avatarUrl,
       email_verificado_em: user.emailVerifiedAt,
       criado_em: user.createdAt,
@@ -665,12 +674,14 @@ export class AuthService {
       sub: user.id,
       email: user.email,
       role: user.role,
+      profile: user.profile,
       type: 'access',
     };
     const refreshPayload: JwtRefreshPayload = {
       sub: user.id,
       email: user.email,
       role: user.role,
+      profile: user.profile,
       jti: refreshTokenId,
       type: 'refresh',
     };
@@ -733,6 +744,18 @@ export class AuthService {
       ipAddress: requestMeta.ipAddress,
       userAgent: requestMeta.userAgent,
     });
+  }
+
+  private mapProfile(value: string | undefined): UserProfile {
+    if (!value) return UserProfile.ANUNCIANTE;
+    const normalized = value.trim().toLowerCase();
+    return normalized === 'comprador'
+      ? UserProfile.COMPRADOR
+      : UserProfile.ANUNCIANTE;
+  }
+
+  private serializeProfile(profile: UserProfile): 'anunciante' | 'comprador' {
+    return profile === UserProfile.COMPRADOR ? 'comprador' : 'anunciante';
   }
 
   private normalizeCpfCnpj(value: string | undefined): string | undefined {

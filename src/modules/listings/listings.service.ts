@@ -6,7 +6,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { ListingStatus, Prisma } from '@prisma/client';
+import { ListingStatus, Prisma, UserProfile, UserRole } from '@prisma/client';
 
 import { PrismaService } from '../prisma/prisma.service';
 import { AddPhotoDto } from './dto/add-photo.dto';
@@ -223,6 +223,8 @@ export class ListingsService {
   }
 
   async create(sellerId: string, dto: CreateListingDto) {
+    await this.assertCanManageListings(sellerId);
+
     const listing = await this.prisma.listing.create({
       data: {
         title: dto.title.trim(),
@@ -357,13 +359,40 @@ export class ListingsService {
   private async assertOwnership(listingId: string, sellerId: string) {
     const listing = await this.prisma.listing.findFirst({
       where: { id: listingId, deletedAt: null },
-      select: { sellerId: true },
+      select: {
+        sellerId: true,
+        seller: { select: { role: true, profile: true } },
+      },
     });
 
     if (!listing) throw new NotFoundException('Anuncio nao encontrado.');
     if (listing.sellerId !== sellerId) {
       throw new ForbiddenException(
         'Sem permissao para modificar este anuncio.',
+      );
+    }
+
+    if (
+      listing.seller.role !== UserRole.ADMIN &&
+      listing.seller.profile !== UserProfile.ANUNCIANTE
+    ) {
+      throw new ForbiddenException(
+        'Somente perfis anunciantes podem gerenciar anuncios.',
+      );
+    }
+  }
+
+  private async assertCanManageListings(userId: string) {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId, deletedAt: null },
+      select: { role: true, profile: true },
+    });
+
+    if (!user) throw new NotFoundException('Usuario nao encontrado.');
+    if (user.role === UserRole.ADMIN) return;
+    if (user.profile !== UserProfile.ANUNCIANTE) {
+      throw new ForbiddenException(
+        'Somente perfis anunciantes podem criar anuncios.',
       );
     }
   }
