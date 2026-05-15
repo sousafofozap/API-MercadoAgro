@@ -4,6 +4,7 @@ import {
   InternalServerErrorException,
   Logger,
   OnModuleInit,
+  ServiceUnavailableException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import nodemailer, { Transporter } from 'nodemailer';
@@ -201,17 +202,27 @@ export class MailService implements OnModuleInit {
       );
     }
 
-    await this.transporter.sendMail({
-      from: {
-        name: this.configService.getOrThrow<string>('MAIL_FROM_NAME'),
-        address: this.configService.getOrThrow<string>('MAIL_FROM_ADDRESS'),
-      },
-      replyTo: this.configService.getOrThrow<string>('MAIL_REPLY_TO'),
-      to: input.to,
-      subject: input.subject,
-      text: input.text,
-      html: input.html,
-    });
+    try {
+      await this.transporter.sendMail({
+        from: {
+          name: this.configService.getOrThrow<string>('MAIL_FROM_NAME'),
+          address: this.configService.getOrThrow<string>('MAIL_FROM_ADDRESS'),
+        },
+        replyTo: this.configService.getOrThrow<string>('MAIL_REPLY_TO'),
+        to: input.to,
+        subject: input.subject,
+        text: input.text,
+        html: input.html,
+      });
+    } catch (error) {
+      this.logger.error(
+        'Falha ao enviar e-mail transacional.',
+        error instanceof Error ? error.stack : String(error),
+      );
+      throw new ServiceUnavailableException(
+        'Nao foi possivel enviar o e-mail. Verifique a caixa de entrada em instantes ou solicite reenvio.',
+      );
+    }
 
     return { preview: 'smtp' };
   }

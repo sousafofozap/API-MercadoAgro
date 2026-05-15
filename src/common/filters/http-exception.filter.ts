@@ -21,6 +21,7 @@ const errorCodes: Record<number, string> = {
   [HttpStatus.CONFLICT]: 'CONFLICT',
   [HttpStatus.UNPROCESSABLE_ENTITY]: 'BUSINESS_RULE',
   [HttpStatus.TOO_MANY_REQUESTS]: 'TOO_MANY_REQUESTS',
+  [HttpStatus.SERVICE_UNAVAILABLE]: 'SERVICE_UNAVAILABLE',
   [HttpStatus.INTERNAL_SERVER_ERROR]: 'INTERNAL_ERROR',
 };
 
