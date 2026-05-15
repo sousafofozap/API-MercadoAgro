@@ -15,6 +15,12 @@ services:
         value: true
       - key: REDIS_ENABLED
         value: false
+      - key: SWAGGER_ENABLED
+        value: false
+      - key: TERMS_VERSION
+        value: '1.0'
+      - key: GEO_CANDIDATE_LIMIT
+        value: '5000'
       - key: DATABASE_URL
         sync: false
       - key: DIRECT_URL

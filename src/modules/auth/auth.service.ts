@@ -66,8 +66,10 @@ export class AuthService {
 
   async register(dto: RegisterDto) {
     const email = dto.email.trim().toLowerCase();
-    const phone = dto.phone?.trim();
-    const cpfCnpj = this.normalizeCpfCnpj(dto.cpfCnpj);
+    const fullName = this.pickRequired(dto.fullName, dto.nome, 'nome');
+    const password = this.pickRequired(dto.password, dto.senha, 'senha');
+    const phone = (dto.phone ?? dto.telefone)?.trim();
+    const cpfCnpj = this.normalizeCpfCnpj(dto.cpfCnpj ?? dto.cpf_cnpj);
 
     const existingUser = await this.prisma.user.findUnique({
       where: { email },
@@ -75,10 +77,12 @@ export class AuthService {
     });
 
     if (existingUser) {
-      throw new ConflictException('Ja existe uma conta cadastrada com este e-mail.');
+      throw new ConflictException(
+        'Ja existe uma conta cadastrada com este e-mail.',
+      );
     }
 
-    const passwordHash = await argon2.hash(dto.password, passwordOptions);
+    const passwordHash = await argon2.hash(password, passwordOptions);
     const now = new Date();
     const termsVersion = this.configService.getOrThrow<string>('TERMS_VERSION');
 
@@ -87,7 +91,7 @@ export class AuthService {
       user = await this.prisma.user.create({
         data: {
           email,
-          fullName: dto.fullName.trim(),
+          fullName: fullName.trim(),
           role: PUBLIC_USER_ROLE,
           ...(phone ? { phone } : {}),
           ...(cpfCnpj ? { cpfCnpj } : {}),
@@ -109,8 +113,11 @@ export class AuthService {
       throw error;
     }
 
-    const { verificationUrl } =
-      await this.issueEmailVerificationToken(user.id, user.email, user.fullName);
+    const { verificationUrl } = await this.issueEmailVerificationToken(
+      user.id,
+      user.email,
+      user.fullName,
+    );
 
     await this.logAudit({
       event: 'auth.registered',
@@ -121,9 +128,14 @@ export class AuthService {
     });
 
     return {
-      message: 'Cadastro realizado. Confirme o e-mail antes de acessar a plataforma.',
+      id: user.id,
+      message:
+        'Cadastro realizado. Confirme o e-mail antes de acessar a plataforma.',
+      nome: user.fullName,
       email: user.email,
+      perfil: 'anunciante',
       role: user.role,
+      criado_em: user.createdAt,
       ...(this.configService.getOrThrow<string>('NODE_ENV') !== 'production'
         ? { verificationUrl }
         : {}),
@@ -132,17 +144,20 @@ export class AuthService {
 
   async verifyEmail(dto: VerifyEmailDto) {
     const tokenHash = hashOpaqueToken(dto.token);
-    const verificationRecord = await this.prisma.emailVerificationToken.findFirst({
-      where: {
-        tokenHash,
-        consumedAt: null,
-        expiresAt: { gt: new Date() },
-      },
-      select: { id: true, userId: true },
-    });
+    const verificationRecord =
+      await this.prisma.emailVerificationToken.findFirst({
+        where: {
+          tokenHash,
+          consumedAt: null,
+          expiresAt: { gt: new Date() },
+        },
+        select: { id: true, userId: true },
+      });
 
     if (!verificationRecord) {
-      throw new BadRequestException('Token de verificacao invalido ou expirado.');
+      throw new BadRequestException(
+        'Token de verificacao invalido ou expirado.',
+      );
     }
 
     await this.prisma.$transaction([
@@ -180,8 +195,11 @@ export class AuthService {
       };
     }
 
-    const { verificationUrl } =
-      await this.issueEmailVerificationToken(user.id, user.email, user.fullName);
+    const { verificationUrl } = await this.issueEmailVerificationToken(
+      user.id,
+      user.email,
+      user.fullName,
+    );
 
     await this.logAudit({
       event: 'auth.verification_resent',
@@ -252,6 +270,7 @@ export class AuthService {
 
   async resetPassword(dto: ResetPasswordDto) {
     const tokenHash = hashOpaqueToken(dto.token);
+    const password = this.pickRequired(dto.password, dto.senha, 'senha');
     const resetRecord = await this.prisma.passwordResetToken.findFirst({
       where: {
         tokenHash,
@@ -262,10 +281,12 @@ export class AuthService {
     });
 
     if (!resetRecord) {
-      throw new BadRequestException('Token de redefinicao invalido ou expirado.');
+      throw new BadRequestException(
+        'Token de redefinicao invalido ou expirado.',
+      );
     }
 
-    const passwordHash = await argon2.hash(dto.password, passwordOptions);
+    const passwordHash = await argon2.hash(password, passwordOptions);
 
     await this.prisma.$transaction([
       this.prisma.user.update({
@@ -289,11 +310,14 @@ export class AuthService {
       targetId: resetRecord.userId,
     });
 
-    return { message: 'Senha redefinida com sucesso. Faca login com a nova senha.' };
+    return {
+      message: 'Senha redefinida com sucesso. Faca login com a nova senha.',
+    };
   }
 
   async login(dto: LoginDto, requestMeta: RequestMeta) {
     const email = dto.email.trim().toLowerCase();
+    const password = this.pickRequired(dto.password, dto.senha, 'senha');
     const user = await this.prisma.user.findUnique({
       where: { email },
       select: {
@@ -324,7 +348,7 @@ export class AuthService {
       throw new UnauthorizedException('Esta conta foi encerrada.');
     }
 
-    const passwordMatches = await argon2.verify(user.passwordHash, dto.password);
+    const passwordMatches = await argon2.verify(user.passwordHash, password);
     if (!passwordMatches) {
       await this.logAudit({
         event: 'auth.login_failed',
@@ -364,17 +388,27 @@ export class AuthService {
       userAgent: requestMeta.userAgent,
     });
 
-    return { user: this.serializeUser(user), ...tokens };
+    const safeUser = this.serializeUser(user);
+    return { user: safeUser, usuario: this.serializeUserPt(user), ...tokens };
   }
 
   async refresh(dto: RefreshTokenDto, requestMeta: RequestMeta) {
-    const refreshSecret = this.configService.getOrThrow<string>('JWT_REFRESH_SECRET');
+    const refreshToken = this.pickRequired(
+      dto.refreshToken,
+      dto.refresh_token,
+      'refresh_token',
+    );
+    const refreshSecret =
+      this.configService.getOrThrow<string>('JWT_REFRESH_SECRET');
 
     let payload: JwtRefreshPayload;
     try {
-      payload = await this.jwtService.verifyAsync<JwtRefreshPayload>(dto.refreshToken, {
-        secret: refreshSecret,
-      });
+      payload = await this.jwtService.verifyAsync<JwtRefreshPayload>(
+        refreshToken,
+        {
+          secret: refreshSecret,
+        },
+      );
     } catch {
       throw new UnauthorizedException('Refresh token invalido.');
     }
@@ -407,7 +441,11 @@ export class AuthService {
     }
 
     if (storedToken.revokedAt) {
-      await this.handleRefreshTokenReuse(storedToken.userId, storedToken.id, requestMeta);
+      await this.handleRefreshTokenReuse(
+        storedToken.userId,
+        storedToken.id,
+        requestMeta,
+      );
       throw new UnauthorizedException('Refresh token expirado ou revogado.');
     }
 
@@ -419,9 +457,16 @@ export class AuthService {
       throw new UnauthorizedException('Esta conta foi encerrada.');
     }
 
-    const refreshMatches = await argon2.verify(storedToken.hashedToken, dto.refreshToken);
+    const refreshMatches = await argon2.verify(
+      storedToken.hashedToken,
+      refreshToken,
+    );
     if (!refreshMatches) {
-      await this.handleRefreshTokenReuse(storedToken.userId, storedToken.id, requestMeta);
+      await this.handleRefreshTokenReuse(
+        storedToken.userId,
+        storedToken.id,
+        requestMeta,
+      );
       throw new UnauthorizedException('Refresh token invalido.');
     }
 
@@ -436,17 +481,31 @@ export class AuthService {
       userAgent: requestMeta.userAgent,
     });
 
-    return { user: this.serializeUser(storedToken.user), ...tokens };
+    const safeUser = this.serializeUser(storedToken.user);
+    return {
+      user: safeUser,
+      usuario: this.serializeUserPt(storedToken.user),
+      ...tokens,
+    };
   }
 
   async logout(userId: string, dto: LogoutDto) {
-    const refreshSecret = this.configService.getOrThrow<string>('JWT_REFRESH_SECRET');
+    const refreshToken = this.pickRequired(
+      dto.refreshToken,
+      dto.refresh_token,
+      'refresh_token',
+    );
+    const refreshSecret =
+      this.configService.getOrThrow<string>('JWT_REFRESH_SECRET');
 
     let payload: JwtRefreshPayload;
     try {
-      payload = await this.jwtService.verifyAsync<JwtRefreshPayload>(dto.refreshToken, {
-        secret: refreshSecret,
-      });
+      payload = await this.jwtService.verifyAsync<JwtRefreshPayload>(
+        refreshToken,
+        {
+          secret: refreshSecret,
+        },
+      );
     } catch {
       throw new UnauthorizedException('Refresh token invalido.');
     }
@@ -498,9 +557,16 @@ export class AuthService {
       }),
     ]);
 
-    const mailResult = await this.mailService.sendVerificationEmail({ email, fullName, token });
+    const mailResult = await this.mailService.sendVerificationEmail({
+      email,
+      fullName,
+      token,
+    });
 
-    return { verificationUrl: mailResult.verificationUrl, preview: mailResult.preview };
+    return {
+      verificationUrl: mailResult.verificationUrl,
+      preview: mailResult.preview,
+    };
   }
 
   private serializeUser(user: SafeUser) {
@@ -513,6 +579,19 @@ export class AuthService {
       avatarUrl: user.avatarUrl,
       emailVerifiedAt: user.emailVerifiedAt,
       createdAt: user.createdAt,
+    };
+  }
+
+  private serializeUserPt(user: SafeUser) {
+    return {
+      id: user.id,
+      nome: user.fullName,
+      email: user.email,
+      telefone: user.phone,
+      perfil: user.role === UserRole.ADMIN ? 'admin' : 'anunciante',
+      foto_url: user.avatarUrl,
+      email_verificado_em: user.emailVerifiedAt,
+      criado_em: user.createdAt,
     };
   }
 
@@ -539,10 +618,18 @@ export class AuthService {
   }
 
   private async rotateRefreshToken(
-    storedToken: { id: string; userId: string; user: SafeUser; expiresAt: Date },
+    storedToken: {
+      id: string;
+      userId: string;
+      user: SafeUser;
+      expiresAt: Date;
+    },
     requestMeta: RequestMeta,
   ) {
-    const tokenBundle = await this.buildTokenBundle(storedToken.user, requestMeta);
+    const tokenBundle = await this.buildTokenBundle(
+      storedToken.user,
+      requestMeta,
+    );
 
     await this.prisma.$transaction(async (tx) => {
       const revocation = await tx.refreshToken.updateMany({
@@ -566,8 +653,10 @@ export class AuthService {
   }
 
   private async buildTokenBundle(user: SafeUser, requestMeta: RequestMeta) {
-    const accessSecret = this.configService.getOrThrow<string>('JWT_ACCESS_SECRET');
-    const refreshSecret = this.configService.getOrThrow<string>('JWT_REFRESH_SECRET');
+    const accessSecret =
+      this.configService.getOrThrow<string>('JWT_ACCESS_SECRET');
+    const refreshSecret =
+      this.configService.getOrThrow<string>('JWT_REFRESH_SECRET');
     const accessTtl = this.configService.getOrThrow<string>('JWT_ACCESS_TTL');
     const refreshTtl = this.configService.getOrThrow<string>('JWT_REFRESH_TTL');
 
@@ -603,6 +692,10 @@ export class AuthService {
         refreshToken,
         tokenType: 'Bearer' as const,
         expiresIn: Math.floor(parseDurationToMs(accessTtl) / 1_000),
+        access_token: accessToken,
+        refresh_token: refreshToken,
+        token_type: 'Bearer' as const,
+        expira_em: Math.floor(parseDurationToMs(accessTtl) / 1_000),
       },
       refreshTokenRecord: {
         id: refreshTokenId,
@@ -658,6 +751,18 @@ export class AuthService {
     return digits;
   }
 
+  private pickRequired(
+    canonical: string | undefined,
+    alias: string | undefined,
+    fieldName: string,
+  ): string {
+    const value = canonical ?? alias;
+    if (!value) {
+      throw new BadRequestException(`Campo obrigatorio ausente: ${fieldName}.`);
+    }
+    return value;
+  }
+
   private isValidCpf(cpf: string): boolean {
     if (/^(\d)\1{10}$/.test(cpf)) return false;
     const calc = (slice: string, factor: number) => {
@@ -675,7 +780,8 @@ export class AuthService {
     if (/^(\d)\1{13}$/.test(cnpj)) return false;
     const calc = (slice: string, weights: number[]) => {
       let sum = 0;
-      for (let i = 0; i < weights.length; i++) sum += Number(slice[i]) * weights[i]!;
+      for (let i = 0; i < weights.length; i++)
+        sum += Number(slice[i]) * weights[i]!;
       const rest = sum % 11;
       return rest < 2 ? 0 : 11 - rest;
     };

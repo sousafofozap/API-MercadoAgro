@@ -40,9 +40,15 @@ export class UsersService {
     return this.prisma.user.update({
       where: { id: userId },
       data: {
-        ...(dto.fullName !== undefined ? { fullName: dto.fullName.trim() } : {}),
-        ...(dto.phone !== undefined ? { phone: dto.phone?.trim() ?? null } : {}),
-        ...(dto.avatarUrl !== undefined ? { avatarUrl: dto.avatarUrl ?? null } : {}),
+        ...(dto.fullName !== undefined || dto.nome !== undefined
+          ? { fullName: (dto.fullName ?? dto.nome)!.trim() }
+          : {}),
+        ...(dto.phone !== undefined || dto.telefone !== undefined
+          ? { phone: (dto.phone ?? dto.telefone)?.trim() ?? null }
+          : {}),
+        ...(dto.avatarUrl !== undefined || dto.avatar_url !== undefined
+          ? { avatarUrl: dto.avatarUrl ?? dto.avatar_url ?? null }
+          : {}),
       },
       select: userSelect,
     });

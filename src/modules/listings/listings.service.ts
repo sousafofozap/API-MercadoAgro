@@ -5,6 +5,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { ListingStatus, Prisma } from '@prisma/client';
 
 import { PrismaService } from '../prisma/prisma.service';
@@ -46,6 +47,7 @@ const listingPublicSelectWithGeo = {
   lat: true,
   lng: true,
 } as const;
+const listingOwnerSelect = listingPublicSelectWithGeo;
 
 const EARTH_RADIUS_KM = 6_371;
 
@@ -88,7 +90,10 @@ function serializeListing<T extends ListingWithPrice>(
 
 @Injectable()
 export class ListingsService {
-  constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
+  constructor(
+    @Inject(PrismaService) private readonly prisma: PrismaService,
+    @Inject(ConfigService) private readonly configService: ConfigService,
+  ) {}
 
   async listPublic(query: ListListingsQueryDto) {
     const page = query.page ?? 1;
@@ -145,6 +150,17 @@ export class ListingsService {
       };
     }
 
+    const candidateLimit = this.configService.getOrThrow<number>(
+      'GEO_CANDIDATE_LIMIT',
+    );
+    const candidateCount = await this.prisma.listing.count({ where });
+
+    if (candidateCount > candidateLimit) {
+      throw new BadRequestException(
+        'Filtro geografico muito amplo. Reduza o raio ou combine mais filtros.',
+      );
+    }
+
     const candidates = await this.prisma.listing.findMany({
       where,
       orderBy: { createdAt: 'desc' },
@@ -154,8 +170,7 @@ export class ListingsService {
     const filtered = candidates.filter((item) => {
       if (item.lat === null || item.lng === null) return false;
       return (
-        haversineKm(query.lat!, query.lng!, item.lat, item.lng) <=
-        query.raioKm!
+        haversineKm(query.lat!, query.lng!, item.lat, item.lng) <= query.raioKm!
       );
     });
 
@@ -196,7 +211,7 @@ export class ListingsService {
         orderBy: { createdAt: 'desc' },
         skip: (page - 1) * pageSize,
         take: pageSize,
-        select: listingPublicSelect,
+        select: listingOwnerSelect,
       }),
       this.prisma.listing.count({ where }),
     ]);
@@ -217,19 +232,25 @@ export class ListingsService {
         ...(dto.category ? { category: dto.category.trim() } : {}),
         ...(dto.brand ? { brand: dto.brand.trim() } : {}),
         ...(dto.modelName ? { modelName: dto.modelName.trim() } : {}),
-        ...(dto.manufacturingYear ? { manufacturingYear: dto.manufacturingYear } : {}),
+        ...(dto.manufacturingYear
+          ? { manufacturingYear: dto.manufacturingYear }
+          : {}),
         ...(dto.condition ? { condition: dto.condition } : {}),
-        ...(dto.hourmeterHours !== undefined ? { hourmeterHours: dto.hourmeterHours } : {}),
+        ...(dto.hourmeterHours !== undefined
+          ? { hourmeterHours: dto.hourmeterHours }
+          : {}),
         ...(dto.powerCv !== undefined ? { powerCv: dto.powerCv } : {}),
         ...(dto.accessories ? { accessories: dto.accessories } : {}),
         ...(dto.imageUrl ? { imageUrl: dto.imageUrl.trim() } : {}),
         ...(dto.locationCity ? { locationCity: dto.locationCity.trim() } : {}),
-        ...(dto.locationState ? { locationState: dto.locationState.trim().toUpperCase() } : {}),
+        ...(dto.locationState
+          ? { locationState: dto.locationState.trim().toUpperCase() }
+          : {}),
         ...(dto.lat !== undefined ? { lat: dto.lat } : {}),
         ...(dto.lng !== undefined ? { lng: dto.lng } : {}),
         seller: { connect: { id: sellerId } },
       },
-      select: listingPublicSelect,
+      select: listingOwnerSelect,
     });
 
     return serializeListing(listing);
@@ -242,26 +263,46 @@ export class ListingsService {
       where: { id },
       data: {
         ...(dto.title !== undefined ? { title: dto.title.trim() } : {}),
-        ...(dto.description !== undefined ? { description: dto.description.trim() } : {}),
+        ...(dto.description !== undefined
+          ? { description: dto.description.trim() }
+          : {}),
         ...(dto.price !== undefined ? { price: dto.price } : {}),
         ...(dto.status !== undefined ? { status: dto.status } : {}),
-        ...(dto.category !== undefined ? { category: dto.category?.trim() ?? null } : {}),
-        ...(dto.brand !== undefined ? { brand: dto.brand?.trim() ?? null } : {}),
-        ...(dto.modelName !== undefined ? { modelName: dto.modelName?.trim() ?? null } : {}),
-        ...(dto.manufacturingYear !== undefined ? { manufacturingYear: dto.manufacturingYear ?? null } : {}),
-        ...(dto.condition !== undefined ? { condition: dto.condition ?? null } : {}),
-        ...(dto.hourmeterHours !== undefined ? { hourmeterHours: dto.hourmeterHours ?? null } : {}),
+        ...(dto.category !== undefined
+          ? { category: dto.category?.trim() ?? null }
+          : {}),
+        ...(dto.brand !== undefined
+          ? { brand: dto.brand?.trim() ?? null }
+          : {}),
+        ...(dto.modelName !== undefined
+          ? { modelName: dto.modelName?.trim() ?? null }
+          : {}),
+        ...(dto.manufacturingYear !== undefined
+          ? { manufacturingYear: dto.manufacturingYear ?? null }
+          : {}),
+        ...(dto.condition !== undefined
+          ? { condition: dto.condition ?? null }
+          : {}),
+        ...(dto.hourmeterHours !== undefined
+          ? { hourmeterHours: dto.hourmeterHours ?? null }
+          : {}),
         ...(dto.powerCv !== undefined ? { powerCv: dto.powerCv ?? null } : {}),
-        ...(dto.accessories !== undefined ? { accessories: dto.accessories } : {}),
-        ...(dto.imageUrl !== undefined ? { imageUrl: dto.imageUrl?.trim() ?? null } : {}),
-        ...(dto.locationCity !== undefined ? { locationCity: dto.locationCity?.trim() ?? null } : {}),
+        ...(dto.accessories !== undefined
+          ? { accessories: dto.accessories }
+          : {}),
+        ...(dto.imageUrl !== undefined
+          ? { imageUrl: dto.imageUrl?.trim() ?? null }
+          : {}),
+        ...(dto.locationCity !== undefined
+          ? { locationCity: dto.locationCity?.trim() ?? null }
+          : {}),
         ...(dto.locationState !== undefined
           ? { locationState: dto.locationState?.trim().toUpperCase() ?? null }
           : {}),
         ...(dto.lat !== undefined ? { lat: dto.lat ?? null } : {}),
         ...(dto.lng !== undefined ? { lng: dto.lng ?? null } : {}),
       },
-      select: listingPublicSelect,
+      select: listingOwnerSelect,
     });
 
     return serializeListing(listing);
@@ -294,7 +335,10 @@ export class ListingsService {
   async removePhoto(listingId: string, photoId: string, sellerId: string) {
     const photo = await this.prisma.photo.findFirst({
       where: { id: photoId, listingId },
-      select: { id: true, listing: { select: { sellerId: true, deletedAt: true } } },
+      select: {
+        id: true,
+        listing: { select: { sellerId: true, deletedAt: true } },
+      },
     });
 
     if (!photo || photo.listing.deletedAt) {
@@ -318,7 +362,9 @@ export class ListingsService {
 
     if (!listing) throw new NotFoundException('Anuncio nao encontrado.');
     if (listing.sellerId !== sellerId) {
-      throw new ForbiddenException('Sem permissao para modificar este anuncio.');
+      throw new ForbiddenException(
+        'Sem permissao para modificar este anuncio.',
+      );
     }
   }
 

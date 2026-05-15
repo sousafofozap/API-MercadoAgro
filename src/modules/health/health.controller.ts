@@ -1,7 +1,9 @@
 import { Controller, Get, Inject } from '@nestjs/common';
-import { ApiOperation, ApiTags } from '@nestjs/swagger';
+import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { Throttle } from '@nestjs/throttler';
+import { UserRole } from '@prisma/client';
 
+import { Roles } from '../../common/decorators/roles.decorator';
 import { Public } from '../../common/decorators/public.decorator';
 import { HealthService } from './health.service';
 
@@ -24,5 +26,13 @@ export class HealthController {
   @ApiOperation({ summary: 'Health check basico da API' })
   getHealth() {
     return this.healthService.check();
+  }
+
+  @Get('ready')
+  @Roles(UserRole.ADMIN)
+  @ApiBearerAuth('access-token')
+  @ApiOperation({ summary: 'Readiness check detalhado para administradores' })
+  getReadiness() {
+    return this.healthService.readiness();
   }
 }

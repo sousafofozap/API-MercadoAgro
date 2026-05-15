@@ -1,4 +1,7 @@
+import 'reflect-metadata';
+
 import {
+  testRegisterAcceptsPortugueseAliases,
   testRefreshRejectsTokenReuseRace,
   testRegisterUsesSinglePublicRole,
 } from './auth.service.test';
@@ -10,9 +13,19 @@ import {
 async function run() {
   const tests: Array<[string, () => Promise<void>]> = [
     ['register uses a single public role', testRegisterUsesSinglePublicRole],
+    [
+      'register accepts Portuguese aliases',
+      testRegisterAcceptsPortugueseAliases,
+    ],
     ['refresh rejects token reuse race', testRefreshRejectsTokenReuseRace],
-    ['client ip prefers forwarded address', testClientIpPrefersForwardedAddress],
-    ['request meta uses normalized client ip', testRequestMetaUsesNormalizedClientIp],
+    [
+      'client ip prefers forwarded address',
+      testClientIpPrefersForwardedAddress,
+    ],
+    [
+      'request meta uses normalized client ip',
+      testRequestMetaUsesNormalizedClientIp,
+    ],
   ];
 
   for (const [name, fn] of tests) {

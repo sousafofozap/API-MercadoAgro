@@ -67,7 +67,9 @@ async function bootstrap() {
     }),
   );
 
-  setupSwagger(app);
+  if (config.getOrThrow<boolean>('SWAGGER_ENABLED')) {
+    setupSwagger(app);
+  }
 
   await app.listen(port, '0.0.0.0');
 }

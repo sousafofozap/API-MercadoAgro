@@ -13,6 +13,8 @@ type RuntimeEnv = {
   JWT_ACCESS_TTL: string;
   JWT_REFRESH_TTL: string;
   CORS_ORIGINS: string[];
+  SWAGGER_ENABLED: boolean;
+  GEO_CANDIDATE_LIMIT: number;
   THROTTLE_TTL_MS: number;
   THROTTLE_LIMIT: number;
   PUBLIC_THROTTLE_LIMIT: number;
@@ -70,7 +72,11 @@ function ensureNumber(
   return resolved;
 }
 
-function ensureDuration(value: string | undefined, key: string, fallback: string) {
+function ensureDuration(
+  value: string | undefined,
+  key: string,
+  fallback: string,
+) {
   const resolved = value?.trim() || fallback;
 
   if (!/^\d+(ms|s|m|h|d)$/.test(resolved)) {
@@ -96,7 +102,9 @@ function ensureBoolean(
   return resolved === 'true';
 }
 
-export function validateEnv(env: Record<string, string | undefined>): RuntimeEnv {
+export function validateEnv(
+  env: Record<string, string | undefined>,
+): RuntimeEnv {
   const nodeEnv =
     (env.NODE_ENV as RuntimeEnv['NODE_ENV'] | undefined) ?? 'development';
   const mailDriver =
@@ -125,16 +133,41 @@ export function validateEnv(env: Record<string, string | undefined>): RuntimeEnv
     DATABASE_URL: ensureString(env.DATABASE_URL, 'DATABASE_URL'),
     DIRECT_URL: ensureString(env.DIRECT_URL, 'DIRECT_URL', env.DATABASE_URL),
     REDIS_ENABLED: ensureBoolean(env.REDIS_ENABLED, 'REDIS_ENABLED', false),
-    REDIS_URL: ensureString(env.REDIS_URL, 'REDIS_URL', 'redis://localhost:6379'),
+    REDIS_URL: ensureString(
+      env.REDIS_URL,
+      'REDIS_URL',
+      'redis://localhost:6379',
+    ),
     JWT_ACCESS_SECRET: ensureSecret(env.JWT_ACCESS_SECRET, 'JWT_ACCESS_SECRET'),
-    JWT_REFRESH_SECRET: ensureSecret(env.JWT_REFRESH_SECRET, 'JWT_REFRESH_SECRET'),
+    JWT_REFRESH_SECRET: ensureSecret(
+      env.JWT_REFRESH_SECRET,
+      'JWT_REFRESH_SECRET',
+    ),
     JWT_ACCESS_TTL: ensureDuration(env.JWT_ACCESS_TTL, 'JWT_ACCESS_TTL', '15m'),
-    JWT_REFRESH_TTL: ensureDuration(env.JWT_REFRESH_TTL, 'JWT_REFRESH_TTL', '30d'),
+    JWT_REFRESH_TTL: ensureDuration(
+      env.JWT_REFRESH_TTL,
+      'JWT_REFRESH_TTL',
+      '30d',
+    ),
     CORS_ORIGINS: (env.CORS_ORIGINS ?? '')
       .split(',')
       .map((origin) => origin.trim())
       .filter(Boolean),
-    THROTTLE_TTL_MS: ensureNumber(env.THROTTLE_TTL_MS, 'THROTTLE_TTL_MS', 60_000),
+    SWAGGER_ENABLED: ensureBoolean(
+      env.SWAGGER_ENABLED,
+      'SWAGGER_ENABLED',
+      nodeEnv !== 'production',
+    ),
+    GEO_CANDIDATE_LIMIT: ensureNumber(
+      env.GEO_CANDIDATE_LIMIT,
+      'GEO_CANDIDATE_LIMIT',
+      5_000,
+    ),
+    THROTTLE_TTL_MS: ensureNumber(
+      env.THROTTLE_TTL_MS,
+      'THROTTLE_TTL_MS',
+      60_000,
+    ),
     THROTTLE_LIMIT: ensureNumber(env.THROTTLE_LIMIT, 'THROTTLE_LIMIT', 100),
     PUBLIC_THROTTLE_LIMIT: ensureNumber(
       env.PUBLIC_THROTTLE_LIMIT,
@@ -142,7 +175,11 @@ export function validateEnv(env: Record<string, string | undefined>): RuntimeEnv
       20,
     ),
     MAIL_DRIVER: mailDriver,
-    MAIL_FROM_NAME: ensureString(env.MAIL_FROM_NAME, 'MAIL_FROM_NAME', 'MercadoAgro'),
+    MAIL_FROM_NAME: ensureString(
+      env.MAIL_FROM_NAME,
+      'MAIL_FROM_NAME',
+      'MercadoAgro',
+    ),
     MAIL_FROM_ADDRESS: ensureString(
       env.MAIL_FROM_ADDRESS,
       'MAIL_FROM_ADDRESS',

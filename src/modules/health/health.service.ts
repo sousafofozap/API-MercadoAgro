@@ -18,7 +18,14 @@ export class HealthService {
     private readonly mailService: MailService,
   ) {}
 
-  async check() {
+  check() {
+    return {
+      status: 'ok',
+      timestamp: new Date().toISOString(),
+    };
+  }
+
+  async readiness() {
     const redisPromise = this.redisService.isEnabled()
       ? this.redisService.ping()
       : Promise.resolve('DISABLED');

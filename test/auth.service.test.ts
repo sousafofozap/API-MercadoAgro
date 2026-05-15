@@ -1,11 +1,13 @@
 import assert from 'node:assert/strict';
 
+import { ValidationPipe } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import { UserRole } from '@prisma/client';
 import * as argon2 from 'argon2';
 
 import { AuthService } from '../src/modules/auth/auth.service';
+import { RegisterDto } from '../src/modules/auth/dto/register.dto';
 import { MailService } from '../src/modules/mail/mail.service';
 import { PrismaService } from '../src/modules/prisma/prisma.service';
 
@@ -25,8 +27,10 @@ function createConfigService(values: Record<string, unknown>) {
 
 function createJwtService(overrides?: Partial<JwtService>) {
   return {
-    signAsync: async (_payload: object, options?: { secret?: string; expiresIn?: string }) =>
-      `signed:${options?.secret}:${options?.expiresIn ?? 'none'}`,
+    signAsync: async (
+      _payload: object,
+      options?: { secret?: string; expiresIn?: string },
+    ) => `signed:${options?.secret}:${options?.expiresIn ?? 'none'}`,
     verifyAsync: async () => {
       throw new Error('verifyAsync not mocked');
     },
@@ -49,7 +53,11 @@ export async function testRegisterUsesSinglePublicRole() {
   const prisma = {
     user: {
       findUnique: async () => null,
-      create: async ({ data }: { data: { role: UserRole; email: string; fullName: string } }) => {
+      create: async ({
+        data,
+      }: {
+        data: { role: UserRole; email: string; fullName: string };
+      }) => {
         createdRole = data.role;
 
         return {
@@ -67,13 +75,14 @@ export async function testRegisterUsesSinglePublicRole() {
     auditLog: {
       create: async () => ({ id: 'audit-1' }),
     },
-    $transaction: async (operations: Promise<unknown>[]) => Promise.all(operations),
+    $transaction: async (operations: Promise<unknown>[]) =>
+      Promise.all(operations),
   } as unknown as PrismaService;
 
   const service = new AuthService(
     prisma,
     createJwtService(),
-    createConfigService({ NODE_ENV: 'test' }),
+    createConfigService({ NODE_ENV: 'test', TERMS_VERSION: '1.0' }),
     createMailService(),
   );
 
@@ -86,6 +95,80 @@ export async function testRegisterUsesSinglePublicRole() {
 
   assert.equal(createdRole, PUBLIC_USER_ROLE);
   assert.equal(result.role, PUBLIC_USER_ROLE);
+}
+
+export async function testRegisterAcceptsPortugueseAliases() {
+  let createdData:
+    | {
+        fullName: string;
+        passwordHash: string;
+        phone?: string;
+        cpfCnpj?: string;
+      }
+    | undefined;
+
+  const prisma = {
+    user: {
+      findUnique: async () => null,
+      create: async ({
+        data,
+      }: {
+        data: typeof createdData & { email: string; role: UserRole };
+      }) => {
+        createdData = data;
+
+        return {
+          id: 'user-1',
+          email: data.email,
+          fullName: data.fullName,
+          role: data.role,
+        };
+      },
+    },
+    emailVerificationToken: {
+      updateMany: async () => ({ count: 0 }),
+      create: async () => ({ id: 'verification-1' }),
+    },
+    auditLog: {
+      create: async () => ({ id: 'audit-1' }),
+    },
+    $transaction: async (operations: Promise<unknown>[]) =>
+      Promise.all(operations),
+  } as unknown as PrismaService;
+
+  const pipe = new ValidationPipe({
+    whitelist: true,
+    transform: true,
+    forbidNonWhitelisted: true,
+  });
+  const dto = (await pipe.transform(
+    {
+      nome: 'Joao Silva',
+      email: 'joao@example.com',
+      senha: 'Senha@Segura123',
+      telefone: '65999990000',
+      perfil: 'anunciante',
+      cpf_cnpj: '52998224725',
+      aceite_termos: true,
+      aceite_privacidade: true,
+    },
+    { type: 'body', metatype: RegisterDto },
+  )) as RegisterDto;
+
+  const service = new AuthService(
+    prisma,
+    createJwtService(),
+    createConfigService({ NODE_ENV: 'test', TERMS_VERSION: '1.0' }),
+    createMailService(),
+  );
+
+  const result = await service.register(dto);
+
+  assert.equal(result.email, 'joao@example.com');
+  assert.equal(createdData?.fullName, 'Joao Silva');
+  assert.equal(createdData?.phone, '65999990000');
+  assert.equal(createdData?.cpfCnpj, '52998224725');
+  assert.ok(createdData?.passwordHash);
 }
 
 export async function testRefreshRejectsTokenReuseRace() {

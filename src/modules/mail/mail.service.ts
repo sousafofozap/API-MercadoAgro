@@ -25,6 +25,19 @@ type EmailResult = {
   preview: 'logger' | 'smtp';
 };
 
+function escapeHtml(value: string): string {
+  return value.replace(/[&<>"']/g, (char) => {
+    const entities: Record<string, string> = {
+      '&': '&amp;',
+      '<': '&lt;',
+      '>': '&gt;',
+      '"': '&quot;',
+      "'": '&#39;',
+    };
+    return entities[char] ?? char;
+  });
+}
+
 @Injectable()
 export class MailService implements OnModuleInit {
   private readonly logger = new Logger(MailService.name);
@@ -36,7 +49,9 @@ export class MailService implements OnModuleInit {
   ) {}
 
   async onModuleInit() {
-    if (this.configService.getOrThrow<'logger' | 'smtp'>('MAIL_DRIVER') !== 'smtp') {
+    if (
+      this.configService.getOrThrow<'logger' | 'smtp'>('MAIL_DRIVER') !== 'smtp'
+    ) {
       return;
     }
 
@@ -58,7 +73,12 @@ export class MailService implements OnModuleInit {
     verificationUrl: string;
     preview: 'logger' | 'smtp';
   }> {
-    const verificationUrl = this.buildUrl('EMAIL_VERIFICATION_URL_TEMPLATE', input.token);
+    const verificationUrl = this.buildUrl(
+      'EMAIL_VERIFICATION_URL_TEMPLATE',
+      input.token,
+    );
+    const safeFullName = escapeHtml(input.fullName);
+    const safeVerificationUrl = escapeHtml(verificationUrl);
     const subject = 'Confirme o seu e-mail no MercadoAgro';
     const text = [
       `Ola, ${input.fullName}.`,
@@ -71,11 +91,11 @@ export class MailService implements OnModuleInit {
     const html = `
       <div style="font-family: Arial, sans-serif; line-height: 1.6; color: #1f2937;">
         <h2 style="color: #166534;">MercadoAgro</h2>
-        <p>Ola, ${input.fullName}.</p>
+        <p>Ola, ${safeFullName}.</p>
         <p>Recebemos o seu cadastro no MercadoAgro.</p>
         <p>Para confirmar o seu e-mail, acesse o link abaixo:</p>
         <p>
-          <a href="${verificationUrl}" style="color: #166534; font-weight: bold;">
+          <a href="${safeVerificationUrl}" style="color: #166534; font-weight: bold;">
             Confirmar e-mail
           </a>
         </p>
@@ -83,13 +103,22 @@ export class MailService implements OnModuleInit {
       </div>
     `.trim();
 
-    const result = await this.sendMail({ to: input.email, subject, text, html });
+    const result = await this.sendMail({
+      to: input.email,
+      subject,
+      text,
+      html,
+    });
 
     return { verificationUrl, preview: result.preview };
   }
 
-  async sendPasswordResetEmail(input: PasswordResetEmailInput): Promise<EmailResult> {
+  async sendPasswordResetEmail(
+    input: PasswordResetEmailInput,
+  ): Promise<EmailResult> {
     const resetUrl = this.buildUrl('PASSWORD_RESET_URL_TEMPLATE', input.token);
+    const safeFullName = escapeHtml(input.fullName);
+    const safeResetUrl = escapeHtml(resetUrl);
     const subject = 'Redefinicao de senha — MercadoAgro';
     const text = [
       `Ola, ${input.fullName}.`,
@@ -103,11 +132,11 @@ export class MailService implements OnModuleInit {
     const html = `
       <div style="font-family: Arial, sans-serif; line-height: 1.6; color: #1f2937;">
         <h2 style="color: #166534;">MercadoAgro</h2>
-        <p>Ola, ${input.fullName}.</p>
+        <p>Ola, ${safeFullName}.</p>
         <p>Recebemos uma solicitacao de redefinicao de senha para a sua conta.</p>
         <p>Clique no link abaixo para criar uma nova senha (valido por <strong>1 hora</strong>):</p>
         <p>
-          <a href="${resetUrl}" style="color: #166534; font-weight: bold;">
+          <a href="${safeResetUrl}" style="color: #166534; font-weight: bold;">
             Redefinir senha
           </a>
         </p>
@@ -115,13 +144,21 @@ export class MailService implements OnModuleInit {
       </div>
     `.trim();
 
-    const result = await this.sendMail({ to: input.email, subject, text, html });
+    const result = await this.sendMail({
+      to: input.email,
+      subject,
+      text,
+      html,
+    });
 
     return { url: resetUrl, preview: result.preview };
   }
 
   async ping() {
-    if (this.configService.getOrThrow<'logger' | 'smtp'>('MAIL_DRIVER') === 'logger') {
+    if (
+      this.configService.getOrThrow<'logger' | 'smtp'>('MAIL_DRIVER') ===
+      'logger'
+    ) {
       return 'LOGGER_READY';
     }
 
@@ -144,7 +181,10 @@ export class MailService implements OnModuleInit {
     text: string;
     html: string;
   }): Promise<{ preview: 'logger' | 'smtp' }> {
-    if (this.configService.getOrThrow<'logger' | 'smtp'>('MAIL_DRIVER') === 'logger') {
+    if (
+      this.configService.getOrThrow<'logger' | 'smtp'>('MAIL_DRIVER') ===
+      'logger'
+    ) {
       this.logger.log(
         [
           'Email gerado em modo logger.',
