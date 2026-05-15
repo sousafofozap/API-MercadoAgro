@@ -24,6 +24,7 @@ Esta implementacao mantem os endpoints tecnicos originais em ingles (`/users`, `
 
 - `POST /v1/auth/register`: cria uma conta
 - `POST /v1/auth/verify-email`: confirma o e-mail da conta
+- `GET /v1/auth/verify-email?token=...`: confirma o e-mail pelo link aberto no navegador
 - `POST /v1/auth/resend-verification`: reenvia verificacao
 - `POST /v1/auth/login`: autentica e devolve tokens
 - `POST /v1/auth/refresh`: rotaciona refresh token
@@ -303,6 +304,7 @@ Consulte `.env.example`. Pontos importantes:
 - `UPLOAD_MAX_BYTES` define o tamanho maximo por imagem multipart
 - `UPLOAD_PUBLIC_BASE_URL` pode fixar a URL publica das imagens enviadas
 - `TERMS_VERSION` registra a versao aceita no cadastro
+- `EMAIL_VERIFICATION_URL_TEMPLATE` pode usar link HTTPS direto, exemplo: `https://mercadoagro-mobile-api.onrender.com/v1/auth/verify-email?token={{token}}`
 
 ## Deploy
 

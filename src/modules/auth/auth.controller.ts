@@ -1,6 +1,15 @@
-import { Body, Controller, Get, Inject, Post, Req } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  Inject,
+  Post,
+  Query,
+  Req,
+  Res,
+} from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
-import { FastifyRequest } from 'fastify';
+import { FastifyReply, FastifyRequest } from 'fastify';
 import { Throttle } from '@nestjs/throttler';
 
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
@@ -39,6 +48,22 @@ export class AuthController {
   @ApiOperation({ summary: 'Confirma o e-mail da conta' })
   verifyEmail(@Body() dto: VerifyEmailDto) {
     return this.authService.verifyEmail(dto);
+  }
+
+  @Get('verify-email')
+  @Public()
+  @Throttle(publicThrottle)
+  @ApiOperation({
+    summary: 'Confirma o e-mail da conta por link aberto no navegador',
+  })
+  async verifyEmailFromLink(
+    @Query() dto: VerifyEmailDto,
+    @Res() reply: FastifyReply,
+  ) {
+    const result = await this.authService.verifyEmail(dto);
+    return reply
+      .type('text/html; charset=utf-8')
+      .send(renderEmailVerificationPage(result.message));
   }
 
   @Post('resend-verification')
@@ -94,4 +119,64 @@ export class AuthController {
   me(@CurrentUser() user: JwtAccessPayload) {
     return user;
   }
+}
+
+function renderEmailVerificationPage(message: string) {
+  return `
+    <!doctype html>
+    <html lang="pt-BR">
+      <head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <title>MercadoAgro - E-mail confirmado</title>
+        <style>
+          body {
+            margin: 0;
+            min-height: 100vh;
+            display: grid;
+            place-items: center;
+            font-family: Arial, sans-serif;
+            background: #f8fafc;
+            color: #172033;
+          }
+          main {
+            width: min(92vw, 520px);
+            padding: 32px;
+            border: 1px solid #dbe3df;
+            border-radius: 8px;
+            background: #fff;
+            box-shadow: 0 16px 40px rgba(15, 23, 42, 0.08);
+          }
+          h1 {
+            margin: 0 0 12px;
+            color: #166534;
+            font-size: 28px;
+          }
+          p {
+            margin: 0;
+            line-height: 1.6;
+          }
+        </style>
+      </head>
+      <body>
+        <main>
+          <h1>E-mail confirmado</h1>
+          <p>${escapeHtml(message)}</p>
+        </main>
+      </body>
+    </html>
+  `.trim();
+}
+
+function escapeHtml(value: string) {
+  return value.replace(/[&<>"']/g, (char) => {
+    const entities: Record<string, string> = {
+      '&': '&amp;',
+      '<': '&lt;',
+      '>': '&gt;',
+      '"': '&quot;',
+      "'": '&#39;',
+    };
+    return entities[char] ?? char;
+  });
 }
